@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+
+# Node / web
+node_modules/
+.next/
+out/
+dist/
+
+# Secrets — never commit
+.env
+.env.*
+!.env.example
+
+# Working scratch
+.cache/
+tmp/
+clones/
+
+# OS
+.DS_Store
+default.profraw
+
+# Local planning and agent context — not part of the published project
+CLAUDE.md
+docs/plans/
