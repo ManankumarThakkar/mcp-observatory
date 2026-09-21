@@ -5,7 +5,7 @@ import pytest
 
 from analyzer.cli import main
 from analyzer.models import Finding, Location
-from analyzer.scanner import scan_directory
+from analyzer.scanner import MAX_FILE_BYTES, SkippedFile, scan_directory
 
 TAG_CHAR = "\U000e0041"  # TAG LATIN CAPITAL LETTER A, invisible to a reader
 
@@ -17,7 +17,7 @@ def test_scan_finds_concealed_unicode_in_a_nested_file(tmp_path: Path) -> None:
     )
     (tmp_path / "README.md").write_text("Ordinary documentation.\n", encoding="utf-8")
 
-    findings = scan_directory(tmp_path, server_id="owner/repo", commit_sha="c" * 40)
+    findings = scan_directory(tmp_path, server_id="owner/repo", commit_sha="c" * 40).findings
 
     assert len(findings) == 1
     assert findings[0].location.file == "src/server.py"
@@ -31,7 +31,7 @@ def test_paths_are_reported_relative_to_the_repository_root(tmp_path: Path) -> N
     nested.mkdir(parents=True)
     (nested / "c.py").write_text(f'x = "{TAG_CHAR}"\n', encoding="utf-8")
 
-    findings = scan_directory(tmp_path, server_id="owner/repo", commit_sha="c" * 40)
+    findings = scan_directory(tmp_path, server_id="owner/repo", commit_sha="c" * 40).findings
 
     assert findings[0].location.file == "a/b/c.py"
 
@@ -47,7 +47,7 @@ def test_vendored_directories_are_not_scanned(tmp_path: Path) -> None:
         vendored.mkdir(parents=True)
         (vendored / "index.js").write_text(f'const d = "{TAG_CHAR}";\n', encoding="utf-8")
 
-    assert scan_directory(tmp_path, server_id="owner/repo", commit_sha="d" * 40) == []
+    assert scan_directory(tmp_path, server_id="owner/repo", commit_sha="d" * 40).findings == ()
 
 
 def test_a_symlink_pointing_outside_the_clone_is_never_read(tmp_path: Path) -> None:
@@ -67,9 +67,9 @@ def test_a_symlink_pointing_outside_the_clone_is_never_read(tmp_path: Path) -> N
     (repo / "src").mkdir(parents=True)
     (repo / "src" / "config.py").symlink_to(outside / "id_rsa")
 
-    findings = scan_directory(repo, server_id="victim/repo", commit_sha="d" * 40)
+    findings = scan_directory(repo, server_id="victim/repo", commit_sha="d" * 40).findings
 
-    assert findings == [], "content from outside the clone reached a published finding"
+    assert findings == (), "content from outside the clone reached a published finding"
 
 
 def test_a_directory_symlink_is_not_traversed(tmp_path: Path) -> None:
@@ -86,7 +86,7 @@ def test_a_directory_symlink_is_not_traversed(tmp_path: Path) -> None:
     repo.mkdir()
     (repo / "vendored").symlink_to(outside, target_is_directory=True)
 
-    assert scan_directory(repo, server_id="owner/repo", commit_sha="d" * 40) == []
+    assert scan_directory(repo, server_id="owner/repo", commit_sha="d" * 40).findings == ()
 
 
 def test_a_broken_symlink_does_not_stop_the_scan(tmp_path: Path) -> None:
@@ -96,7 +96,7 @@ def test_a_broken_symlink_does_not_stop_the_scan(tmp_path: Path) -> None:
     (repo / "dangling.py").symlink_to(tmp_path / "does-not-exist.py")
     (repo / "real.py").write_text(f'x = "{TAG_CHAR}"\n', encoding="utf-8")
 
-    findings = scan_directory(repo, server_id="owner/repo", commit_sha="d" * 40)
+    findings = scan_directory(repo, server_id="owner/repo", commit_sha="d" * 40).findings
 
     assert len(findings) == 1
     assert findings[0].location.file == "real.py"
@@ -113,7 +113,7 @@ def test_a_binary_file_with_a_scannable_extension_does_not_stop_the_scan(
     (tmp_path / "data.json").write_bytes(b"\x00\xff\xfe not really json")
     (tmp_path / "real.py").write_text(f'x = "{TAG_CHAR}"\n', encoding="utf-8")
 
-    findings = scan_directory(tmp_path, server_id="owner/repo", commit_sha="e" * 40)
+    findings = scan_directory(tmp_path, server_id="owner/repo", commit_sha="e" * 40).findings
 
     assert len(findings) == 1
     assert findings[0].location.file == "real.py"
@@ -131,7 +131,7 @@ def test_an_unreadable_file_does_not_stop_the_scan(tmp_path: Path) -> None:
     (tmp_path / "real.py").write_text(f'x = "{TAG_CHAR}"\n', encoding="utf-8")
 
     try:
-        findings = scan_directory(tmp_path, server_id="owner/repo", commit_sha="e" * 40)
+        findings = scan_directory(tmp_path, server_id="owner/repo", commit_sha="e" * 40).findings
     finally:
         unreadable.chmod(0o644)  # so pytest can clean the directory up
 
@@ -148,7 +148,7 @@ def test_a_byte_order_mark_does_not_become_a_finding(tmp_path: Path) -> None:
     """
     (tmp_path / "server.py").write_bytes(b'\xef\xbb\xbfdescription = "Reads a file."\n')
 
-    assert scan_directory(tmp_path, server_id="owner/repo", commit_sha="e" * 40) == []
+    assert scan_directory(tmp_path, server_id="owner/repo", commit_sha="e" * 40).findings == ()
 
 
 def test_an_uppercase_extension_is_still_scanned(tmp_path: Path) -> None:
@@ -157,7 +157,7 @@ def test_an_uppercase_extension_is_still_scanned(tmp_path: Path) -> None:
     server.PY."""
     (tmp_path / "SERVER.PY").write_text(f'x = "{TAG_CHAR}"\n', encoding="utf-8")
 
-    findings = scan_directory(tmp_path, server_id="owner/repo", commit_sha="e" * 40)
+    findings = scan_directory(tmp_path, server_id="owner/repo", commit_sha="e" * 40).findings
 
     assert len(findings) == 1
 
@@ -234,7 +234,7 @@ def test_a_file_over_the_size_cap_is_skipped(
     oversized.write_text(f'# {"padding " * 40}\nd = "{TAG_CHAR}"\n', encoding="utf-8")
     assert oversized.stat().st_size > 64
 
-    assert scan_directory(tmp_path, server_id="owner/repo", commit_sha="f" * 40) == []
+    assert scan_directory(tmp_path, server_id="owner/repo", commit_sha="f" * 40).findings == ()
 
 
 def test_a_file_within_the_size_cap_is_still_scanned(
@@ -247,7 +247,7 @@ def test_a_file_within_the_size_cap_is_still_scanned(
     small.write_text(f'd = "{TAG_CHAR}"\n', encoding="utf-8")
     assert small.stat().st_size <= 64
 
-    assert len(scan_directory(tmp_path, server_id="owner/repo", commit_sha="f" * 40)) == 1
+    assert len(scan_directory(tmp_path, server_id="owner/repo", commit_sha="f" * 40).findings) == 1
 
 
 def test_an_oversized_file_does_not_stop_the_rest_of_the_scan(
@@ -258,7 +258,7 @@ def test_an_oversized_file_does_not_stop_the_rest_of_the_scan(
     (tmp_path / "huge.py").write_text("# " + "padding " * 40 + "\n", encoding="utf-8")
     (tmp_path / "real.py").write_text(f'd = "{TAG_CHAR}"\n', encoding="utf-8")
 
-    findings = scan_directory(tmp_path, server_id="owner/repo", commit_sha="f" * 40)
+    findings = scan_directory(tmp_path, server_id="owner/repo", commit_sha="f" * 40).findings
 
     assert len(findings) == 1
     assert findings[0].location.file == "real.py"
@@ -302,3 +302,65 @@ def test_legitimate_non_ascii_paths_are_left_alone() -> None:
 
     for path in ("src/server.py", "src/服务器.py", "src/café.py"):
         assert safe_relative_path(Path(path)) == path
+
+
+def test_an_oversized_file_is_reported_rather_than_dropped(tmp_path: Path) -> None:
+    """An invisible skip is the same shape of problem as a rule that never ran.
+
+    The published index says a server was scanned. If a quarter of its source
+    was silently too large to read, "scanned" is a claim about work that did
+    not happen, and nothing in the output would say so.
+    """
+    (tmp_path / "huge.py").write_text("x" * (MAX_FILE_BYTES + 1), encoding="utf-8")
+
+    report = scan_directory(tmp_path, server_id="owner/repo", commit_sha="a" * 40)
+
+    assert report.skipped == (SkippedFile(path="huge.py", reason="too-large"),)
+
+
+def test_an_undecodable_file_is_reported(tmp_path: Path) -> None:
+    (tmp_path / "binary.py").write_bytes(b"\xff\xfe\x00\x01not text")
+
+    report = scan_directory(tmp_path, server_id="owner/repo", commit_sha="a" * 40)
+
+    assert report.skipped == (SkippedFile(path="binary.py", reason="undecodable"),)
+
+
+def test_a_symlink_is_reported(tmp_path: Path) -> None:
+    """Worth reporting rather than merely worth refusing.
+
+    A link pointing out of the repository is how a hostile repository tries to
+    get a file from the scanning host attributed to itself. We decline to
+    follow it, and saying that we declined is more useful than silence.
+    """
+    (tmp_path / "real.py").write_text("print('hi')\n", encoding="utf-8")
+    (tmp_path / "link.py").symlink_to(tmp_path / "real.py")
+
+    report = scan_directory(tmp_path, server_id="owner/repo", commit_sha="a" * 40)
+
+    assert report.skipped == (SkippedFile(path="link.py", reason="symlink"),)
+
+
+def test_files_excluded_by_design_are_not_reported_as_skips(tmp_path: Path) -> None:
+    """A skip is work we wanted to do and could not, not work we never wanted.
+
+    Reporting every image, lockfile and vendored dependency would produce
+    thousands of entries per server and bury the handful that mean something.
+    """
+    (tmp_path / "logo.png").write_bytes(b"\x89PNG\r\n")
+    vendored = tmp_path / "node_modules" / "pkg"
+    vendored.mkdir(parents=True)
+    (vendored / "index.js").write_text("module.exports = {}\n", encoding="utf-8")
+
+    report = scan_directory(tmp_path, server_id="owner/repo", commit_sha="a" * 40)
+
+    assert report.skipped == ()
+
+
+def test_skips_are_ordered_so_two_scans_of_one_repository_match(tmp_path: Path) -> None:
+    for name in ("c.py", "a.py", "b.py"):
+        (tmp_path / name).write_bytes(b"\xff\xfe bad")
+
+    report = scan_directory(tmp_path, server_id="owner/repo", commit_sha="a" * 40)
+
+    assert [s.path for s in report.skipped] == ["a.py", "b.py", "c.py"]

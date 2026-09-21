@@ -23,7 +23,6 @@ from analyzer.crawler.github import (
 from analyzer.crawler.http import FetchFailed, JsonObject, http_fetch
 from analyzer.crawler.registry import RegistryError, crawl_registry
 from analyzer.fetcher.clone import FetchError, shallow_clone
-from analyzer.models import Finding
 from analyzer.scanner import scan_directory
 
 # A directory scanned in place was never cloned, so there is no commit to
@@ -160,7 +159,7 @@ def _scan(args: argparse.Namespace) -> int:
         if not root.is_dir():
             raise NotADirectoryError(f"{args.path} is not a directory")
         commit_sha = LOCAL_SCAN_SHA
-        findings: list[Finding] = scan_directory(root, args.server_id, commit_sha)
+        report = scan_directory(root, args.server_id, commit_sha)
     else:
         # TemporaryDirectory removes the clone on the way out, on success
         # and on failure alike. The fetcher cleans up after its own
@@ -169,13 +168,16 @@ def _scan(args: argparse.Namespace) -> int:
         with tempfile.TemporaryDirectory() as workdir:
             result = shallow_clone(args.repo_url, Path(workdir) / "repo")
             commit_sha = result.commit_sha
-            findings = scan_directory(result.path, args.server_id, commit_sha)
+            report = scan_directory(result.path, args.server_id, commit_sha)
 
     json.dump(
         {
             "server_id": args.server_id,
             "commit_sha": commit_sha,
-            "findings": [finding.to_dict() for finding in findings],
+            "findings": [finding.to_dict() for finding in report.findings],
+            "skipped_files": [
+                {"path": skip.path, "reason": skip.reason} for skip in report.skipped
+            ],
         },
         sys.stdout,
         indent=2,
