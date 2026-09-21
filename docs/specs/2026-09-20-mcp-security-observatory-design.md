@@ -1,4 +1,4 @@
-# MCP Security Observatory — Design
+# MCP Security Observatory - Design
 
 **Date:** 2026-09-20
 **Status:** Awaiting review
@@ -7,7 +7,7 @@
 
 MCP servers are plugins that AI assistants load to gain capabilities. A server
 declares its tools in natural language, and the assistant acts on those
-declarations — making a server's own metadata an instruction channel into the
+declarations - making a server's own metadata an instruction channel into the
 model. Published research reports that 33% of 1,000 scanned servers carried
 critical vulnerabilities, 82% of file-operation implementations were vulnerable
 to path traversal, and roughly 5.5% showed tool poisoning. Editors including
@@ -78,7 +78,7 @@ Each component is independently testable and communicates by file.
 ### 6.1 Crawler (`analyzer/crawler/`)
 Enumerates candidate servers from the official MCP registry API, supplemented by
 GitHub code search for MCP SDK imports.
-**Output:** `server_index.jsonl` — `{server_id, repo_url, commit_sha, language, discovered_via, stars, archived}`.
+**Output:** `server_index.jsonl` - `{server_id, repo_url, commit_sha, language, discovered_via, stars, archived}`.
 **Depends on:** network, GitHub API token.
 
 ### 6.2 Fetcher (`analyzer/fetcher/`)
@@ -155,7 +155,7 @@ measurement quality is worse than fewer. `SCOPE-OVERBROAD` is the first to cut i
 ```
 
 `finding_id` is deterministic, so the same issue across nightly runs is one
-record with an updated `last_seen` — which is what produces the time series.
+record with an updated `last_seen` - which is what produces the time series.
 
 ## 9. Error handling
 
@@ -194,7 +194,7 @@ disclosure window; exploit code is never published; maintainer opt-out is
 honored unconditionally.
 
 The disclosure gate is enforced in code, in `analyzer/report/`, not by
-convention — a finding cannot reach `data/` in a publishable state without
+convention - a finding cannot reach `data/` in a publishable state without
 passing it.
 
 ## 12. Deployment
@@ -205,7 +205,7 @@ passing it.
 - **Secrets:** `ANTHROPIC_API_KEY` and `GITHUB_TOKEN` as Actions secrets.
 - **Estimated run cost:** the first full scan is the only expensive one. At a
   v1 target of ~1,000 servers averaging roughly two semantic findings each,
-  that is ~2,000 uncached triage calls of a few hundred tokens apiece — low
+  that is ~2,000 uncached triage calls of a few hundred tokens apiece - low
   single-digit dollars on Haiku. Subsequent nightly runs approach zero, because
   `finding_id` is deterministic and the cache absorbs every unchanged finding.
 - **Hard spend guard:** the triage layer enforces a configurable maximum of

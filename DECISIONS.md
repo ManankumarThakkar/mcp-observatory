@@ -4,7 +4,7 @@ Each entry records a decision, the alternatives considered, and why.
 
 ---
 
-## D1 — Static analysis only; never execute a scanned server
+## D1 - Static analysis only; never execute a scanned server
 
 **Decision.** The analyzer reads source. It never runs `npm install`,
 `pip install`, a build step, or the server itself.
@@ -18,7 +18,7 @@ it exists to detect. This constraint is load-bearing, not a precaution.
 
 ---
 
-## D2 — Commit scan results to the repository instead of hosting a database
+## D2 - Commit scan results to the repository instead of hosting a database
 
 **Decision.** Findings are written to `data/` as JSONL and committed.
 
@@ -31,7 +31,7 @@ backup burden for data that is append-mostly and small).
 
 ---
 
-## D3 — Python analyzer with tree-sitter, rather than per-language tooling
+## D3 - Python analyzer with tree-sitter, rather than per-language tooling
 
 **Decision.** One analyzer, written in Python, parsing both Python and
 TypeScript servers through tree-sitter.
@@ -49,7 +49,7 @@ but the v1 detection rules cover Python only. See D6.
 
 ---
 
-## D4 — Small model for triage, not a frontier model
+## D4 - Small model for triage, not a frontier model
 
 **Decision.** `claude-haiku-4-5-20251001` adjudicates ambiguous findings.
 
@@ -61,7 +61,7 @@ it and the decision gets revisited with evidence.
 
 ---
 
-## D5 — Measure the triage layer rather than trusting it
+## D5 - Measure the triage layer rather than trusting it
 
 **Decision.** A hand-labeled golden set, with per-rule precision, recall,
 and F1 tracked in CI and gating merges on regression.
@@ -72,19 +72,19 @@ the part that demonstrates evaluation skill directly.
 
 ---
 
-## D6 — v1 deep rules cover Python only, and the dashboard says so
+## D6 - v1 deep rules cover Python only, and the dashboard says so
 
 **Decision.** `UNICODE-CONCEAL` runs against every server in the corpus, because
-it is a character scan that needs no parser. The four tree-sitter rules —
+it is a character scan that needs no parser. The four tree-sitter rules -
 `TOOL-DESC-INJECTION`, `PATH-TRAVERSAL`, `SHELL-EXEC-UNSAFE`, `SCOPE-OVERBROAD`
-— cover Python servers only in v1. The published results state per-language
+- cover Python servers only in v1. The published results state per-language
 coverage explicitly rather than presenting a Python figure as an ecosystem one.
 
 **Why.** D3 chose tree-sitter precisely so both languages could be covered, and
 that remains the destination. But TypeScript rules are not a translation of the
 Python ones: the taint analysis differs, each rule needs a second query and its
 own fixtures, and the work would delay every other part of the project
-— including the accuracy measurement, which is the thing that actually
+- including the accuracy measurement, which is the thing that actually
 distinguishes this work.
 
 Shipping a measured, honest half beats delaying a complete one. The failure mode
