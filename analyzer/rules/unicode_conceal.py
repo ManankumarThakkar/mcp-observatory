@@ -45,7 +45,17 @@ class UnicodeConcealRule:
         # still reported.
         source = ctx.source.removeprefix("\ufeff")
 
-        for line_number, line in enumerate(source.splitlines(), start=1):
+        # split("\n") rather than splitlines(). splitlines() also breaks on
+        # U+2028, U+2029, U+0085 and several C0 controls, none of which git, an
+        # editor or a reviewer counts as a line. A file prefixed with invisible
+        # separators could therefore choose the line number published against
+        # it, so a reviewer opening the file found nothing there and read a
+        # true finding as a false positive. It also shifted finding_id, which
+        # includes the line, giving the same issue a new identity each run.
+        #
+        # Those separators now remain visible to the loop below as ordinary
+        # characters on their line, rather than being consumed as structure.
+        for line_number, line in enumerate(source.split("\n"), start=1):
             for char in line:
                 classified = _classify(char)
                 if classified is None:

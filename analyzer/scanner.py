@@ -28,6 +28,29 @@ SKIP_DIRS = frozenset(
 MAX_FILE_BYTES = 1024 * 1024
 
 
+def safe_relative_path(relative: Path) -> str:
+    """Render a repository path as text that can always be encoded and published.
+
+    A filename is attacker-controlled and, on Linux, need not be valid UTF-8.
+    Path decodes such bytes with surrogateescape, so the path arrives holding
+    lone surrogates, and `str.encode("utf-8")` refuses those. That raised
+    UnicodeEncodeError inside `finding_id`, which subclasses ValueError rather
+    than OSError, so it escaped the CLI's handler and killed the whole run.
+
+    The effect was the attacker's goal exactly: one such filename anywhere in a
+    repository discarded every finding for that server, including real ones,
+    leaving the repository permanently unscannable and therefore permanently
+    unreported.
+
+    Cleaned here, at the single point where a path enters the system, so the
+    same value is used for the finding's identity, for its published location,
+    and by every later report layer. Valid UTF-8 round-trips untouched; only
+    undecodable bytes become U+FFFD, which keeps the path recognisable to
+    whoever reads the finding.
+    """
+    return relative.as_posix().encode("utf-8", "surrogateescape").decode("utf-8", "replace")
+
+
 def scan_directory(root: Path, server_id: str, commit_sha: str) -> list[Finding]:
     """Apply every rule in ALL_RULES to every scannable file under root."""
     findings: list[Finding] = []
@@ -79,7 +102,7 @@ def scan_directory(root: Path, server_id: str, commit_sha: str) -> list[Finding]
         ctx = FileContext(
             server_id=server_id,
             commit_sha=commit_sha,
-            relative_path=relative.as_posix(),
+            relative_path=safe_relative_path(relative),
             source=source,
         )
         for rule in ALL_RULES:

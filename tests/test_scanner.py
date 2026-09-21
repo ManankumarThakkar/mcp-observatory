@@ -4,6 +4,7 @@ from pathlib import Path
 import pytest
 
 from analyzer.cli import main
+from analyzer.models import Finding, Location
 from analyzer.scanner import scan_directory
 
 TAG_CHAR = "\U000e0041"  # TAG LATIN CAPITAL LETTER A, invisible to a reader
@@ -261,3 +262,43 @@ def test_an_oversized_file_does_not_stop_the_rest_of_the_scan(
 
     assert len(findings) == 1
     assert findings[0].location.file == "real.py"
+
+
+def test_an_undecodable_filename_cannot_destroy_a_whole_scan() -> None:
+    """A single byte in a filename must not hide every finding in a repository.
+
+    On Linux a filename may contain bytes that are not valid UTF-8. Path
+    decodes them with surrogateescape, so the path arrives as a string holding
+    lone surrogates, and `str.encode("utf-8")` refuses those. That raises
+    UnicodeEncodeError inside finding_id, which subclasses ValueError rather
+    than OSError, so the CLI's handler did not catch it.
+
+    The result was the attacker's goal exactly: put one such filename anywhere
+    in a repository, and the scan of every other file succeeds and is then
+    thrown away when serialisation dies. The repository becomes permanently
+    unscannable, and therefore permanently unreported, on a public risk index.
+    """
+    from analyzer.scanner import safe_relative_path
+
+    cleaned = safe_relative_path(Path("src/decoy\udcff.py"))
+
+    finding = Finding(
+        server_id="owner/repo",
+        commit_sha="a" * 40,
+        rule_id="UNICODE-CONCEAL",
+        severity="critical",
+        confidence="high",
+        location=Location(file=cleaned, line=1),
+        evidence="zero-width-space U+200B at line 1",
+    )
+
+    assert json.loads(json.dumps(finding.to_dict()))["location"]["file"] == cleaned
+    assert finding.finding_id
+
+
+def test_legitimate_non_ascii_paths_are_left_alone() -> None:
+    """The cleaning must not mangle paths that are perfectly valid."""
+    from analyzer.scanner import safe_relative_path
+
+    for path in ("src/server.py", "src/服务器.py", "src/café.py"):
+        assert safe_relative_path(Path(path)) == path
