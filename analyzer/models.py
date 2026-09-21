@@ -2,10 +2,21 @@
 
 import hashlib
 from dataclasses import asdict, dataclass
-from typing import Literal
+from typing import Literal, get_args
 
 Severity = Literal["critical", "high", "medium", "low", "info"]
 Confidence = Literal["high", "medium", "low"]
+
+# Derived from the annotations above rather than restated, so the static type
+# and the runtime check cannot drift apart. Widening either Literal widens the
+# guard automatically.
+SEVERITIES: tuple[str, ...] = get_args(Severity)
+CONFIDENCES: tuple[str, ...] = get_args(Confidence)
+
+
+def _require_one_of(value: str, allowed: tuple[str, ...], field: str) -> None:
+    if value not in allowed:
+        raise ValueError(f"{field} must be one of {', '.join(allowed)}, got {value!r}")
 
 
 @dataclass(frozen=True)
@@ -23,6 +34,18 @@ class Finding:
     confidence: Confidence
     location: Location
     evidence: str
+
+    def __post_init__(self) -> None:
+        """Reject an unknown severity or confidence at construction.
+
+        The Literal annotations above are enforced only by a type checker, and
+        none runs here yet. Without this a typo such as "hgh" would travel
+        unnoticed into the report layer, where an unrecognised severity maps to
+        the lowest SARIF level and a critical finding is published as a note.
+        Failing at construction keeps a bad value out of the record entirely.
+        """
+        _require_one_of(self.severity, SEVERITIES, "severity")
+        _require_one_of(self.confidence, CONFIDENCES, "confidence")
 
     @property
     def finding_id(self) -> str:

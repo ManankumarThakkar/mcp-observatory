@@ -1,6 +1,9 @@
 import json
+from typing import get_args
 
-from analyzer.models import Finding, Location
+import pytest
+
+from analyzer.models import Confidence, Finding, Location, Severity
 
 
 def _finding(
@@ -8,13 +11,15 @@ def _finding(
     *,
     file: str = "src/index.ts",
     line: int = 42,
+    severity: str = "critical",
+    confidence: str = "high",
 ) -> Finding:
     return Finding(
         server_id="owner/repo",
         commit_sha="a" * 40,
         rule_id="UNICODE-CONCEAL",
-        severity="critical",
-        confidence="high",
+        severity=severity,
+        confidence=confidence,
         location=Location(file=file, line=line),
         evidence=evidence,
     )
@@ -72,3 +77,27 @@ def test_to_dict_is_json_serialisable():
     payload = _finding().to_dict()
 
     assert json.loads(json.dumps(payload)) == payload
+
+
+def test_unknown_severity_is_rejected_at_construction():
+    """A typo must fail loudly here rather than become a wrong SARIF level."""
+    with pytest.raises(ValueError, match="severity"):
+        _finding(severity="hgh")
+
+
+def test_unknown_confidence_is_rejected_at_construction():
+    with pytest.raises(ValueError, match="confidence"):
+        _finding(confidence="certain")
+
+
+def test_every_declared_severity_and_confidence_is_accepted():
+    """A guard that rejects valid input is worse than no guard.
+
+    Driven from the Literal declarations, so widening either type cannot
+    leave this test asserting a stale set.
+    """
+    for severity in get_args(Severity):
+        assert _finding(severity=severity).severity == severity
+
+    for confidence in get_args(Confidence):
+        assert _finding(confidence=confidence).confidence == confidence
