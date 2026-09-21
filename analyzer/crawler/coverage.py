@@ -62,25 +62,29 @@ def render_coverage(coverage: Coverage) -> str:
     scanned_why = "What the published index is actually about."
 
     rows = (
-        ("Dropped: no source to read", coverage.skipped_without_source, dropped_why),
-        ("Collapsed: already counted", corpus.entries_collapsed, collapsed_why),
-        ("**Scanned: distinct repositories**", corpus.repository_count, scanned_why),
+        ("Dropped: no source to read", f"{coverage.skipped_without_source:,}", dropped_why),
+        ("Collapsed: already counted", f"{corpus.entries_collapsed:,}", collapsed_why),
+        (
+            "**Scanned: distinct repositories**",
+            f"**{corpus.repository_count:,}**",
+            scanned_why,
+        ),
     )
 
     reconciliation = (
-        f"{coverage.skipped_without_source} + {corpus.entries_collapsed} + "
-        f"{corpus.repository_count} = {accounted}, against {coverage.entries_seen} "
-        "entries seen. The arithmetic closes by construction: nothing disappears "
-        "between two numbers."
+        f"{coverage.skipped_without_source:,} + {corpus.entries_collapsed:,} + "
+        f"{corpus.repository_count:,} = {accounted:,}, against "
+        f"{coverage.entries_seen:,} entries seen. The arithmetic closes by "
+        "construction: nothing disappears between two numbers."
     )
 
     offered = (
-        f"The registry returned **{coverage.entries_seen}** entries. An entry is a "
+        f"The registry returned **{coverage.entries_seen:,}** entries. An entry is a "
         "registered name, not a server, and the two are not the same thing."
     )
 
     collapsing = (
-        f"The most-claimed repository carries **{corpus.most_claimed_count}** "
+        f"The most-claimed repository carries **{corpus.most_claimed_count:,}** "
         "registered names. Counting names rather than repositories would let a "
         "single publisher set the headline figure. The names are not discarded: "
         "every one is recorded against its repository in the generated corpus, "

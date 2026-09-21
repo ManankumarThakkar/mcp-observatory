@@ -99,3 +99,29 @@ def test_the_corpus_records_the_names_that_claim_each_repository(tmp_path: Path)
     payload = json.loads(destination.read_text(encoding="utf-8"))
     shared = next(r for r in payload["repositories"] if r["repo_url"].endswith("shared/repo"))
     assert shared["server_ids"] == ["one/a", "three/c", "two/b"]
+
+
+def test_large_counts_are_readable() -> None:
+    """This document is read by people, and the numbers are its whole point.
+
+    A published figure of 34212 asks the reader to count digits before they can
+    tell it from 3421 or 342120.
+    """
+    crawl = Crawl(
+        records=tuple(
+            ServerRecord(
+                server_id=f"pub/name-{n}",
+                repo_url=f"https://github.com/owner/repo-{n // 3}",
+                discovered_via="registry",
+            )
+            for n in range(34212)
+        ),
+        entries_seen=48000,
+        skipped_without_source=13788,
+    )
+
+    rendered = render_coverage(Coverage.from_crawl(crawl, crawled_at="2026-09-21T00:00:00Z"))
+
+    assert "48,000" in rendered
+    assert "13,788" in rendered
+    assert "34212" not in rendered

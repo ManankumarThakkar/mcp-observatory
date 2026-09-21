@@ -167,7 +167,7 @@ def test_cli_scans_a_local_path_and_writes_json(
 ) -> None:
     (tmp_path / "server.py").write_text(f'd = "{TAG_CHAR}"\n', encoding="utf-8")
 
-    exit_code = main(["--path", str(tmp_path), "--server-id", "owner/repo"])
+    exit_code = main(["scan", "--path", str(tmp_path), "--server-id", "owner/repo"])
 
     payload = json.loads(capsys.readouterr().out)
     assert exit_code == 0
@@ -186,7 +186,7 @@ def test_a_clean_scan_still_emits_valid_json(
     """
     (tmp_path / "server.py").write_text("x = 1\n", encoding="utf-8")
 
-    exit_code = main(["--path", str(tmp_path), "--server-id", "owner/repo"])
+    exit_code = main(["scan", "--path", str(tmp_path), "--server-id", "owner/repo"])
 
     payload = json.loads(capsys.readouterr().out)
     assert exit_code == 0
@@ -196,7 +196,7 @@ def test_a_clean_scan_still_emits_valid_json(
 def test_a_missing_path_is_reported_clearly_and_prints_no_json(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    exit_code = main(["--path", str(tmp_path / "nope"), "--server-id", "owner/repo"])
+    exit_code = main(["scan", "--path", str(tmp_path / "nope"), "--server-id", "owner/repo"])
 
     captured = capsys.readouterr()
     assert exit_code == 2
@@ -209,7 +209,7 @@ def test_a_rejected_url_surfaces_as_a_clean_error_not_a_traceback(
 ) -> None:
     """The URL allowlist is a security control, so its refusal is an ordinary
     outcome the CLI reports, not an internal error the user has to decode."""
-    exit_code = main(["--repo-url", "ext::sh -c 'x'", "--server-id", "owner/repo"])
+    exit_code = main(["scan", "--repo-url", "ext::sh -c 'x'", "--server-id", "owner/repo"])
 
     captured = capsys.readouterr()
     assert exit_code == 2
