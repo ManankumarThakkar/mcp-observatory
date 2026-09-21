@@ -57,7 +57,7 @@ class Response:
 Opener = Callable[[str], Response]
 
 
-def _as_response(error: urllib.error.HTTPError) -> Response:
+def as_response(error: urllib.error.HTTPError) -> Response:
     """Turn urllib's exception for a non-2xx status back into a response.
 
     urlopen raises on 4xx and 5xx rather than returning them, and HTTPError
@@ -92,7 +92,7 @@ def _urlopen(url: str) -> Response:
                 body=response.read(),
             )
     except urllib.error.HTTPError as error:
-        return _as_response(error)
+        return as_response(error)
 
 
 def _retry_after(headers: Mapping[str, str]) -> float | None:

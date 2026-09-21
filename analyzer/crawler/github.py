@@ -1,8 +1,19 @@
 """Find MCP servers that were published to a code host but never registered."""
 
+import time
+import urllib.error
+import urllib.request
 from collections.abc import Callable, Iterator
+from urllib.parse import urlencode
 
-from analyzer.crawler.http import JsonObject
+from analyzer.crawler.http import (
+    REQUEST_TIMEOUT_SECONDS,
+    JsonObject,
+    Opener,
+    Response,
+    as_response,
+    http_fetch,
+)
 from analyzer.crawler.registry import ServerRecord
 
 # Measured on 2026-09-21. Both queries match implementations and consumers
@@ -127,3 +138,62 @@ def iter_discoveries(
             # asking again buys nothing and costs a request from the budget.
             if count < RESULTS_PER_PAGE:
                 break
+
+
+SEARCH_ENDPOINT = "https://api.github.com/search/code"
+
+# Ten requests a minute, so one every six seconds with a little room. Waiting
+# before each request rather than after the failure is deliberate: exceeding
+# the limit returns a 403 whose body has no items, which this module treats as
+# fatal, so a pass that paced itself badly would stop rather than degrade.
+PACE_SECONDS = 6.5
+
+
+def _authorised_opener(token: str) -> Opener:
+    """An opener that authenticates, reusing the retry logic in `http_fetch`.
+
+    Code search rejects anonymous requests outright, so the token is not an
+    optimisation. Building an opener rather than threading a token through
+    `http_fetch` keeps that module free of any one host's authentication.
+    """
+
+    def opener(url: str) -> Response:
+        request = urllib.request.Request(
+            url,
+            headers={
+                "Accept": "application/vnd.github+json",
+                "Authorization": f"Bearer {token}",
+                "X-GitHub-Api-Version": "2022-11-28",
+            },
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=REQUEST_TIMEOUT_SECONDS) as response:
+                return Response(
+                    status=response.status,
+                    headers={key.lower(): value for key, value in response.headers.items()},
+                    body=response.read(),
+                )
+        except urllib.error.HTTPError as error:
+            return as_response(error)
+
+    return opener
+
+
+def github_search(token: str, *, sleep: Callable[[float], None] = time.sleep) -> SearchFn:
+    """Build a search callable that keeps itself under the rate limit."""
+    opener = _authorised_opener(token)
+
+    def search(query: str, page: int) -> JsonObject:
+        sleep(PACE_SECONDS)
+        url = f"{SEARCH_ENDPOINT}?" + urlencode(
+            {
+                "q": query,
+                "per_page": RESULTS_PER_PAGE,
+                "page": page,
+                "sort": "indexed",
+                "order": "desc",
+            }
+        )
+        return http_fetch(url, opener=opener)
+
+    return search

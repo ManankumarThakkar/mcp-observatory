@@ -94,3 +94,61 @@ def test_a_crawl_that_cannot_reach_the_registry_exits_nonzero(
     monkeypatch.chdir(tmp_path)
 
     assert main(["crawl"]) == EXIT_SCAN_FAILED
+
+
+def test_a_crawl_can_include_the_code_search_sample(tmp_path: Path) -> None:
+    def search(query: str, page: int) -> JsonObject:
+        return {"items": [{"repository": {"full_name": "brand/new"}}]}
+
+    coverage = run_crawl(
+        fetch=lambda url: PAGE,
+        now=lambda: FIXED_NOW,
+        summary_path=tmp_path / "coverage.md",
+        corpus_path=tmp_path / "corpus.json",
+        search=search,
+        search_requests=3,
+    )
+
+    assert coverage.sample is not None
+    assert coverage.sample_beyond_census == 1
+    assert "not a census" in (tmp_path / "coverage.md").read_text(encoding="utf-8").lower()
+
+
+def test_a_crawl_without_a_search_client_publishes_only_the_census(tmp_path: Path) -> None:
+    """The registry crawl must not need a code host token to run.
+
+    Code search requires authentication, and a contributor without a token
+    should still be able to reproduce the census, which is the part the
+    published figure rests on.
+    """
+    coverage = run_crawl(
+        fetch=lambda url: PAGE,
+        now=lambda: FIXED_NOW,
+        summary_path=tmp_path / "coverage.md",
+        corpus_path=tmp_path / "corpus.json",
+    )
+
+    assert coverage.sample is None
+
+
+def test_code_search_without_a_token_fails_before_the_registry_is_read(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Refusing late would waste the crawl and then publish the wrong thing.
+
+    The caller asked for a census plus a sample. Discovering the missing token
+    after ninety seconds of crawling would leave them with a census they did
+    not ask for and an exit code they might not read.
+    """
+    read: list[str] = []
+
+    def record(url: str) -> JsonObject:
+        read.append(url)
+        return PAGE
+
+    monkeypatch.setattr("analyzer.cli.http_fetch", record)
+    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+    monkeypatch.chdir(tmp_path)
+
+    assert main(["crawl", "--with-code-search"]) == EXIT_SCAN_FAILED
+    assert read == []

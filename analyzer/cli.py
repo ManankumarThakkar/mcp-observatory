@@ -2,14 +2,24 @@
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 import tempfile
 from collections.abc import Callable
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 
-from analyzer.crawler.coverage import Coverage, render_coverage, write_corpus
+from analyzer.crawler.coverage import Coverage, Sample, render_coverage, write_corpus
+from analyzer.crawler.github import (
+    DEFAULT_MAX_REQUESTS,
+    SEARCH_QUERIES,
+    GitHubSearchError,
+    SearchFn,
+    github_search,
+    iter_discoveries,
+)
 from analyzer.crawler.http import FetchFailed, JsonObject, http_fetch
 from analyzer.crawler.registry import RegistryError, crawl_registry
 from analyzer.fetcher.clone import FetchError, shallow_clone
@@ -26,6 +36,10 @@ LOCAL_SCAN_SHA = "local"
 # zero whether or not it found anything, because findings are the output rather
 # than a failure, and the nightly pipeline consumes that output.
 EXIT_SCAN_FAILED = 2
+
+# Read from the environment rather than a flag: a token on a command line
+# lands in shell history and in process listings.
+TOKEN_VARIABLE = "GITHUB_TOKEN"
 
 # Committed, because a reader should be able to check our coverage claim
 # without first running a four-minute crawl.
@@ -60,6 +74,14 @@ def _build_parser() -> argparse.ArgumentParser:
     crawl.add_argument(
         "--corpus", default=str(DEFAULT_CORPUS_PATH), help="Where to write the full corpus."
     )
+    crawl.add_argument(
+        "--with-code-search",
+        action="store_true",
+        help=(
+            "Also search a code host for servers that were never registered. "
+            f"Needs {TOKEN_VARIABLE} and takes about twenty minutes."
+        ),
+    )
 
     return parser
 
@@ -70,6 +92,8 @@ def run_crawl(
     now: Callable[[], datetime],
     summary_path: Path,
     corpus_path: Path,
+    search: SearchFn | None = None,
+    search_requests: int = DEFAULT_MAX_REQUESTS,
 ) -> Coverage:
     """Read the whole registry, then write the summary and the corpus.
 
@@ -83,12 +107,41 @@ def run_crawl(
     particular date, and a timestamp nobody controls cannot be asserted.
     """
     crawl = crawl_registry(fetch)
-    coverage = Coverage.from_crawl(crawl, crawled_at=_stamp(now()))
+    moment = now()
+    coverage = Coverage.from_crawl(crawl, crawled_at=_stamp(moment))
+
+    if search is not None:
+        coverage = replace(coverage, sample=_search_sample(search, search_requests, moment))
 
     summary_path.parent.mkdir(parents=True, exist_ok=True)
     summary_path.write_text(render_coverage(coverage), encoding="utf-8")
     write_corpus(corpus_path, coverage)
     return coverage
+
+
+def _search_sample(search: SearchFn, max_requests: int, moment: datetime) -> Sample:
+    """Run one bounded code-search pass and report what it actually spent.
+
+    The spend is counted rather than assumed. A pass can stop early when every
+    query runs out of results, and reporting the budget it was allowed would
+    describe a run that did not happen.
+
+    The rotation offset comes from the date, so consecutive nightly runs begin
+    at different size buckets and the sample accumulates instead of re-reading
+    the same slice forever.
+    """
+    spent = 0
+
+    def counted(query: str, page: int) -> JsonObject:
+        nonlocal spent
+        spent += 1
+        return search(query, page)
+
+    discoveries = iter_discoveries(
+        counted, max_requests=max_requests, offset=moment.date().toordinal()
+    )
+    repo_urls = tuple(sorted({record.repo_url for record in discoveries}))
+    return Sample(repo_urls=repo_urls, queries=SEARCH_QUERIES, requests_spent=spent)
 
 
 def _stamp(moment: datetime) -> str:
@@ -132,11 +185,26 @@ def _scan(args: argparse.Namespace) -> int:
 
 
 def _crawl(args: argparse.Namespace) -> int:
+    search = None
+    if args.with_code_search:
+        token = os.environ.get(TOKEN_VARIABLE, "")
+        if not token:
+            # Refused before the registry crawl rather than after it. Code
+            # search rejects anonymous requests outright, so discovering this
+            # at the end would waste ninety seconds and then publish a census
+            # the caller had explicitly asked to extend.
+            raise FetchFailed(
+                f"--with-code-search needs {TOKEN_VARIABLE}; code search rejects "
+                "anonymous requests"
+            )
+        search = github_search(token)
+
     coverage = run_crawl(
         fetch=http_fetch,
         now=lambda: datetime.now(UTC),
         summary_path=Path(args.summary),
         corpus_path=Path(args.corpus),
+        search=search,
     )
     corpus = coverage.corpus
     print(
@@ -146,6 +214,13 @@ def _crawl(args: argparse.Namespace) -> int:
         f"{corpus.repository_count} repositories to scan",
         file=sys.stderr,
     )
+    if coverage.sample is not None:
+        print(
+            f"code search: {coverage.sample_size} candidates, "
+            f"{coverage.sample_beyond_census} of them in no registry, "
+            f"{coverage.sample.requests_spent} requests",
+            file=sys.stderr,
+        )
     return 0
 
 
@@ -154,7 +229,14 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         return _scan(args) if args.command == "scan" else _crawl(args)
-    except (FetchError, FetchFailed, RegistryError, OSError, subprocess.SubprocessError) as exc:
+    except (
+        FetchError,
+        FetchFailed,
+        GitHubSearchError,
+        RegistryError,
+        OSError,
+        subprocess.SubprocessError,
+    ) as exc:
         # Expected failures: a refused URL, a repository over the caps, a
         # missing directory, git exiting non-zero or timing out, an
         # unreachable registry, a registry whose shape changed. Each is
