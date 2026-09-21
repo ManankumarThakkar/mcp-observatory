@@ -5,7 +5,7 @@ requires-python = ">=3.11"
 dependencies = []
 
 [project.optional-dependencies]
-dev = ["pytest>=8.0", "ruff>=0.6"]
+dev = ["pytest>=8.0", "ruff>=0.6", "mypy>=1.11"]
 
 [build-system]
 requires = ["hatchling"]
@@ -20,3 +20,10 @@ testpaths = ["tests"]
 [tool.ruff]
 line-length = 100
 target-version = "py311"
+
+[tool.mypy]
+# 3.11 is the requires-python floor, not the version we happen to run. Checking
+# against the floor catches syntax and stdlib calls that only exist in 3.12.
+python_version = "3.11"
+strict = true
+files = ["analyzer", "tests"]
