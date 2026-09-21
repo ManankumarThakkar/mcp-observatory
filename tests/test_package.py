@@ -11,4 +11,4 @@ def test_version_is_derived_from_installed_distribution_metadata() -> None:
     the drift this guards against. It also proves the package is installed,
     since unreadable metadata raises rather than returning a wrong answer.
     """
-    assert analyzer.__version__ == "9.9.9"  # deliberate break
+    assert analyzer.__version__ == version("mcp-observatory") + "-deliberate-break"
