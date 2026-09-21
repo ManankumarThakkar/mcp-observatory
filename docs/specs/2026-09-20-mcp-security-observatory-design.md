@@ -115,11 +115,29 @@ Static dashboard. Reads `data/` at build time. No runtime backend.
 
 | Rule ID | Detects | Severity | LLM-adjudicated |
 |---|---|---|---|
-| `UNICODE-CONCEAL` | Unicode TAG blocks (U+E0000–U+E007F), bidi overrides, zero-width characters in tool metadata | critical | No |
+| `UNICODE-CONCEAL` | Unicode TAG blocks (U+E0000–U+E007F), bidi overrides and isolates, zero-width characters, anywhere in a scanned file | critical | No |
 | `TOOL-DESC-INJECTION` | Imperative or adversarial instructions embedded in tool descriptions | high | Yes |
 | `PATH-TRAVERSAL` | File operations on unvalidated tool-input paths | high | Partial |
 | `SHELL-EXEC-UNSAFE` | Subprocess invocation with interpolated tool input and no allowlist | critical | Partial |
 | `SCOPE-OVERBROAD` | Declared filesystem or network scope materially wider than the declared tools require | medium | Yes |
+
+**`UNICODE-CONCEAL` scans whole files, not only tool metadata.** Extracting
+tool metadata reliably needs a parser, which would delay this rule behind the
+tree-sitter work and restrict it to the languages that harness covers. A
+codepoint scan needs neither, so this is the one rule that reaches every server
+in the corpus whatever it is written in. The cost is a wider net, paid for by
+narrowing the ranges rather than the scope: U+200C and U+200D are excluded
+because both are load-bearing in emoji sequences and in Persian and Indic
+scripts, and a U+FEFF at the start of a file is an encoding artefact rather
+than concealment.
+
+**Severity and confidence carry different things.** Severity is the impact if
+the concealment is real, which does not vary: critical throughout. Confidence
+is how likely it is to be real, which does vary. TAG characters and bidi
+overrides have no innocent explanation in source and report `high`. Bidi
+isolates and zero-width characters sometimes appear legitimately and report
+`medium`. This rule is not model-adjudicated, so confidence is the only signal
+distinguishing a deliberate concealment from a stray character.
 
 **"Partial" adjudication** means the rule fires deterministically when the taint
 path from tool input to the dangerous sink is direct, and is routed to the model
