@@ -13,7 +13,7 @@ node_modules/
 out/
 dist/
 
-# Secrets — never commit
+# Secrets - never commit
 .env
 .env.*
 !.env.example
@@ -27,6 +27,7 @@ clones/
 .DS_Store
 default.profraw
 
-# Local planning and agent context — not part of the published project
+# Local planning and agent context - not part of the published project
 CLAUDE.md
 docs/plans/
+docs/research/
