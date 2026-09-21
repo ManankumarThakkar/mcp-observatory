@@ -20,6 +20,22 @@ testpaths = ["tests"]
 [tool.ruff]
 line-length = 100
 target-version = "py311"
+# Fixtures are sample MCP servers standing in for third-party code, not source
+# we maintain, so our lint standards do not apply to them in either direction.
+#
+# The vulnerable ones are deliberately dangerous: ruff has 413 rules enabled
+# here, several of which exist to catch exactly what those files demonstrate
+# (PLE2502 bidirectional-unicode, PLE2515 zero-width-space). Linting them means
+# suppressing the tool for finding what we planted.
+#
+# The clean ones matter more, and are the reason this is a blanket exclude
+# rather than a per-file ignore. Their job is to be realistic near-misses that
+# must NOT trigger a rule. A real MCP server in the wild does not pass 413 lint
+# rules: the clean shell-exec fixture calls `subprocess.run` without `check=`,
+# which is ordinary real-world code and trips PLW1510. Forcing the clean
+# fixtures to satisfy our standards would make them unrepresentative of the
+# code they stand in for, which defeats their purpose.
+extend-exclude = ["fixtures"]
 
 [tool.mypy]
 # 3.11 is the requires-python floor, not the version we happen to run. Checking
