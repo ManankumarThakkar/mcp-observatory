@@ -82,7 +82,7 @@ def _page_url(cursor: str | None) -> str:
 
 
 def iter_servers(
-    fetch: Callable[[str], JsonObject], *, max_pages: int = 200
+    fetch: Callable[[str], JsonObject], *, max_pages: int = 2000
 ) -> Iterator[ServerRecord]:
     """Yield one record per registry entry.
 
@@ -92,10 +92,22 @@ def iter_servers(
     signature the real HTTP client will have.
     """
     cursor: str | None = None
+    seen_cursors: set[str] = set()
 
-    # Bounded rather than "until the cursor runs out". A registry bug that
-    # returns the same cursor forever would otherwise loop until the nightly
-    # job is killed, with nothing in the output to say why.
+    # Two separate guards, because they catch different things.
+    #
+    # A repeated cursor is a loop, and is detectable outright on the second
+    # request. Relying on a page count for this instead means hundreds of
+    # pointless requests, and only works if the limit happens to be below the
+    # registry's real size, which is a moving target: this limit was 200 pages
+    # until a live crawl passed 20,000 entries with the cursor still advancing
+    # correctly. The registry is simply much larger than the 9,652 the design
+    # document recorded.
+    #
+    # A cursor that changes every time but never ends is not a loop and nothing
+    # detects it except a limit, so max_pages stays as a backstop. It is set
+    # generously, because firing on a healthy registry is the failure mode that
+    # actually happened.
     for _ in range(max_pages):
         payload = fetch(_page_url(cursor))
         yield from _records_in(payload)
@@ -109,6 +121,9 @@ def iter_servers(
             return
         if not isinstance(cursor, str):
             raise RegistryError(f"registry returned a non-string cursor: {cursor!r}")
+        if cursor in seen_cursors:
+            raise RegistryError(f"registry pagination is looping on cursor {cursor!r}")
+        seen_cursors.add(cursor)
 
     # Falling out of the loop means pages remain. Returning quietly here would
     # publish a truncated index that reads exactly like a complete one, which
@@ -151,22 +166,25 @@ def _records_in(payload: JsonObject) -> Iterator[ServerRecord]:
         # it was, which affects every entry. A key holding an empty string is
         # one bad record, and it falls through to the scheme check below like
         # any other URL that is not https.
-        # Every way of having no usable url is the same case: {}, a source
-        # with no url, an empty string, a non-string. The registry is claiming
-        # a repository and then declining to say where, which is the response
-        # contradicting itself rather than a fact about one server.
+        # Any repository we cannot turn into a URL is skipped, by every route:
+        # absent, null, not a dict, no url key, empty string, not a string.
+        # One rule, so there is no arbitrary line between shapes that mean the
+        # same thing.
         #
-        # This is deliberately fatal, and it does mean one bad record ends a
-        # crawl. Accepted: the registry is a curated service, a live crawl of
-        # 357 servers produced none of these, and the alternative is a
-        # regression emitting them everywhere being reported as a successful
-        # scan of an empty ecosystem. A URL that exists but names a transport
-        # we refuse is different, and is skipped below.
+        # This was briefly fatal instead, on the reasoning that a regression
+        # emitting empty objects everywhere would report an empty ecosystem as
+        # a successful crawl. The reasoning was sound and the data was not: a
+        # 2000-entry crawl of the live registry holds 50 repositories that are
+        # a dict with no url key. Making that fatal broke the crawler against
+        # reality on the first run.
+        #
+        # The concern it came from is real and does not belong here. A parser
+        # cannot tell one odd record from a systemic break; a pipeline that
+        # sees a crawl return near-zero servers where it previously returned
+        # thousands can. Filed against Task 12.
         repo_url = repository.get("url") if isinstance(repository, dict) else None
         if not isinstance(repo_url, str) or not repo_url:
-            raise RegistryError(
-                f"{name} has a repository with no usable url: {str(repository)[:120]}"
-            )
+            continue
 
         if urlparse(repo_url).scheme != ALLOWED_REPOSITORY_SCHEME:
             continue

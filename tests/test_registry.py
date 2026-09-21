@@ -169,14 +169,30 @@ def test_pagination_follows_the_cursor_until_it_runs_out() -> None:
     ]
 
 
-def test_max_pages_bounds_a_registry_that_never_stops_paginating() -> None:
-    """A registry bug returning the same cursor forever must not loop.
+def test_a_repeated_cursor_is_caught_immediately_not_after_max_pages() -> None:
+    """A looping cursor is detectable outright, so it should not need a limit.
 
-    The bound is still exactly max_pages requests. It now also raises rather
-    than returning quietly, because a truncated crawl that reads as a complete
-    one is the failure this module exists to refuse.
+    Catching it by page count means hundreds of pointless requests first, and
+    only works if the limit is below the registry's real size, which is a
+    moving target: the limit was 200 pages until a live crawl passed 20,000
+    entries with the cursor advancing correctly.
     """
     urls, fetch = _recording_fetch([{"servers": [], "metadata": {"nextCursor": "same"}}])
+
+    with pytest.raises(RegistryError, match="looping"):
+        list(iter_servers(fetch, max_pages=500))
+
+    assert len(urls) == 2, "caught on the repeat, not by exhausting the limit"
+
+
+def test_max_pages_still_backstops_a_cursor_that_never_repeats() -> None:
+    """A cursor that changes every time but never ends is not a loop.
+
+    Nothing detects that except a limit, so the limit stays as a backstop, and
+    hitting it is an error rather than a quiet truncation.
+    """
+    pages = [{"servers": [], "metadata": {"nextCursor": f"c{i}"}} for i in range(10)]
+    urls, fetch = _recording_fetch(pages)
 
     with pytest.raises(RegistryError, match="max_pages"):
         list(iter_servers(fetch, max_pages=3))
@@ -203,7 +219,6 @@ def test_a_payload_with_no_server_list_is_an_error_not_an_empty_result() -> None
     [
         ({}, "no server key"),
         ({"server": {}}, "no name"),
-        ({"server": {"name": "a/b", "repository": {"source": "github"}}}, "repository without a url"),
     ],
 )
 def test_a_structurally_broken_entry_stops_the_run(entry: JsonObject, because: str) -> None:
@@ -232,34 +247,33 @@ def test_a_page_without_metadata_is_treated_as_the_last_page() -> None:
 
 
 @pytest.mark.parametrize("url", [12345, ["https://github.com/a/b"], {"href": "x"}, None])
-def test_a_repository_url_that_is_not_a_string_stops_the_run(url: object) -> None:
-    """Anyone can publish to the registry, so the type is not guaranteed either.
+def test_a_repository_url_that_is_not_a_string_is_skipped(url: object) -> None:
+    """Anyone can publish to the registry, so the type is not guaranteed.
 
-    A list or an integer here reached urlparse and raised AttributeError, a
-    bare traceback rather than the documented error, and one crafted entry
-    would end the whole nightly crawl.
+    A list or an integer reached urlparse and raised AttributeError, so one
+    crafted entry ended the crawl with a bare traceback. Skipped now, like
+    every other repository we cannot turn into a URL.
     """
     entry = copy.deepcopy(REGISTRY_PAGE["servers"][0])
     entry["server"]["repository"]["url"] = url
     _, fetch = _recording_fetch([{"servers": [entry], "metadata": {"nextCursor": None}}])
 
-    with pytest.raises(RegistryError, match="url"):
-        list(iter_servers(fetch))
+    assert list(iter_servers(fetch)) == []
 
 
-def test_a_repository_object_with_no_url_stops_the_run_however_it_is_empty() -> None:
-    """An empty repository object and one holding only a source are the same case.
+@pytest.mark.parametrize("repository", [{}, {"source": "github"}, {"url": ""}, None, "x"])
+def test_a_repository_with_no_usable_url_is_skipped(repository: object) -> None:
+    """Every way of having no url means the same thing, so all behave alike.
 
-    Previously `{}` was skipped while `{"source": "github"}` raised, which is
-    arbitrary. Worse, a registry regression emitting `{}` for every entry would
-    have yielded zero servers and published an empty ecosystem successfully.
+    A dict with no url key is not hypothetical: 50 of 2000 live entries are
+    exactly that. An earlier version treated it as a broken response and broke
+    against the real registry on the first run.
     """
     entry = copy.deepcopy(REGISTRY_PAGE["servers"][0])
-    entry["server"]["repository"] = {}
+    entry["server"]["repository"] = repository
     _, fetch = _recording_fetch([{"servers": [entry], "metadata": {"nextCursor": None}}])
 
-    with pytest.raises(RegistryError, match="url"):
-        list(iter_servers(fetch))
+    assert list(iter_servers(fetch)) == []
 
 
 def test_a_null_metadata_block_is_treated_as_the_last_page() -> None:
@@ -279,18 +293,3 @@ def test_a_cursor_that_is_not_a_string_stops_the_run() -> None:
 
     with pytest.raises(RegistryError, match="cursor"):
         list(iter_servers(fetch))
-
-
-def test_running_out_of_pages_with_a_cursor_left_is_an_error() -> None:
-    """A truncated crawl must not look like a complete one.
-
-    This is the same failure this module raises for a missing server list: an
-    incomplete result that reads as a healthy one. The page limit exists to
-    stop a stuck cursor looping forever, and hitting it means either that bug
-    or a registry larger than we planned for. Both need saying out loud rather
-    than silently publishing a partial index.
-    """
-    _, fetch = _recording_fetch([{"servers": [], "metadata": {"nextCursor": "never-ends"}}])
-
-    with pytest.raises(RegistryError, match="max_pages"):
-        list(iter_servers(fetch, max_pages=3))
