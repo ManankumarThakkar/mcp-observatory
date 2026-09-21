@@ -1,0 +1,35 @@
+name: CodeQL
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    # Weekly, so new queries run against code that has not changed. Most of
+    # what CodeQL will ever find here is already written; only its rule set
+    # keeps moving.
+    - cron: "24 4 * * 1"
+
+permissions:
+  contents: read
+  # Required to upload results to the security tab. Scoped to this workflow
+  # rather than granted repository-wide.
+  security-events: write
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: github/codeql-action/init@3ea06614dafe36dec890db3446326e0d40ce53d4 # v3
+        with:
+          languages: python
+          # security-extended rather than the default suite. This project reads
+          # untrusted repositories and publishes claims about them, so the
+          # higher false-positive rate of the wider suite is the cheaper side
+          # of the trade.
+          queries: security-extended
+
+      - uses: github/codeql-action/analyze@3ea06614dafe36dec890db3446326e0d40ce53d4 # v3
