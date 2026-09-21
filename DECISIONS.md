@@ -175,3 +175,39 @@ methodology, which is the conversation this project wants to be in.
 **Not doing.** Running other scanners against the corpus and publishing a
 league table. The benchmark is an invitation, not an attack, and numbers
 produced by us running somebody else's tool would rightly be questioned.
+
+---
+
+## D9 - Cap the size of any single file the scanner will read
+
+**Decision.** The scanner skips a file larger than 1 MB. The fetcher's 50 MB
+cap on a whole repository stays as it is.
+
+**Why.** The repository cap permits one file using all of it, and that case was
+measured rather than estimated:
+
+| | 48.6 MB file | with the cap |
+|---|---|---|
+| Scan time | 23.35 s | 0.001 s |
+| Peak memory | 235 MB | negligible |
+
+A thousand-server nightly run of such repositories would take 6.4 hours and
+exceed the CI job limit. Padding a repository costs an attacker nothing, which
+makes this a cheap way to slow down the run that exists to watch them. Most of
+the memory came from splitting 3 million lines into a list, not from the file
+itself.
+
+1 MB is generous for source code. What exceeds it is minified bundles,
+generated code and vendored blobs, none of which should be attributed to the
+repository that happens to contain them.
+
+**Cost, stated plainly.** A finding inside a very large but legitimate file
+goes undetected. That is a real recall loss, accepted because the alternative
+is a nightly run that can be stalled by anyone who pads a repository.
+
+**Not yet handled.** Nothing records *which* files were skipped. A skip that
+nobody can see is the same shape of problem as a rule that silently does not
+run (D7 reasoning, and the argument that replaced the rule registry). It is
+bounded and rare here rather than systemic, but per-file skip reporting belongs
+with the per-server outcome model in the scan orchestrator, and should be added
+when that exists.

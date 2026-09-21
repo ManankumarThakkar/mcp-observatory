@@ -214,3 +214,50 @@ def test_a_rejected_url_surfaces_as_a_clean_error_not_a_traceback(
     assert exit_code == 2
     assert "ext" in captured.err
     assert captured.out == ""
+
+
+def test_a_file_over_the_size_cap_is_skipped(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Scanning cost is bounded per file, not only per repository.
+
+    The fetcher caps a repository at 50 MB, which allows one file using all of
+    it. Measured, that file takes 23 seconds and 235 MB of memory to scan, so a
+    thousand-server run of such repositories would exceed the CI job limit.
+    Padding a repository is cheap, which makes it a cheap way to slow down the
+    run that is supposed to be watching you.
+    """
+    monkeypatch.setattr("analyzer.scanner.MAX_FILE_BYTES", 64)
+
+    oversized = tmp_path / "huge.py"
+    oversized.write_text(f'# {"padding " * 40}\nd = "{TAG_CHAR}"\n', encoding="utf-8")
+    assert oversized.stat().st_size > 64
+
+    assert scan_directory(tmp_path, server_id="owner/repo", commit_sha="f" * 40) == []
+
+
+def test_a_file_within_the_size_cap_is_still_scanned(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The counterpart: the cap must not be so eager it skips ordinary files."""
+    monkeypatch.setattr("analyzer.scanner.MAX_FILE_BYTES", 64)
+
+    small = tmp_path / "small.py"
+    small.write_text(f'd = "{TAG_CHAR}"\n', encoding="utf-8")
+    assert small.stat().st_size <= 64
+
+    assert len(scan_directory(tmp_path, server_id="owner/repo", commit_sha="f" * 40)) == 1
+
+
+def test_an_oversized_file_does_not_stop_the_rest_of_the_scan(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("analyzer.scanner.MAX_FILE_BYTES", 64)
+
+    (tmp_path / "huge.py").write_text("# " + "padding " * 40 + "\n", encoding="utf-8")
+    (tmp_path / "real.py").write_text(f'd = "{TAG_CHAR}"\n', encoding="utf-8")
+
+    findings = scan_directory(tmp_path, server_id="owner/repo", commit_sha="f" * 40)
+
+    assert len(findings) == 1
+    assert findings[0].location.file == "real.py"

@@ -15,6 +15,18 @@ SKIP_DIRS = frozenset(
     {".git", "node_modules", ".venv", "venv", "dist", "build", "__pycache__"}
 )
 
+# Largest file worth reading. The fetcher caps a whole repository at 50 MB,
+# which permits one file using all of it: measured, such a file costs 23
+# seconds and 235 MB of memory, and a thousand-server run of those would pass
+# the CI job limit. Padding a repository is cheap, so without this the run that
+# watches the ecosystem can be slowed down by the things it is watching.
+#
+# 1 MB is generous for source. What exceeds it is minified bundles, generated
+# code and vendored blobs, none of which should be attributed to the repository
+# anyway. The cost is real and recorded in DECISIONS.md: a finding inside a
+# very large legitimate file goes undetected.
+MAX_FILE_BYTES = 1024 * 1024
+
 
 def scan_directory(root: Path, server_id: str, commit_sha: str) -> list[Finding]:
     """Apply every rule in ALL_RULES to every scannable file under root."""
@@ -44,6 +56,12 @@ def scan_directory(root: Path, server_id: str, commit_sha: str) -> list[Finding]
         # parent.parts rather than parts, so the check cannot be tripped by a
         # file whose own name happens to match.
         if SKIP_DIRS.intersection(relative.parent.parts):
+            continue
+
+        # Checked before reading, so an oversized file costs a stat rather than
+        # the memory to hold it. Safe to stat here because symlinks were
+        # already excluded above.
+        if path.stat().st_size > MAX_FILE_BYTES:
             continue
 
         try:
