@@ -1,12 +1,17 @@
-"""Command line entry point: scan one MCP server and report findings as JSON."""
+"""Command line entry point: crawl the ecosystem, or scan one MCP server."""
 
 import argparse
 import json
 import subprocess
 import sys
 import tempfile
+from collections.abc import Callable
+from datetime import UTC, datetime
 from pathlib import Path
 
+from analyzer.crawler.coverage import Coverage, render_coverage, write_corpus
+from analyzer.crawler.http import FetchFailed, JsonObject, http_fetch
+from analyzer.crawler.registry import RegistryError, crawl_registry
 from analyzer.fetcher.clone import FetchError, shallow_clone
 from analyzer.models import Finding
 from analyzer.scanner import scan_directory
@@ -22,48 +27,96 @@ LOCAL_SCAN_SHA = "local"
 # than a failure, and the nightly pipeline consumes that output.
 EXIT_SCAN_FAILED = 2
 
+# Committed, because a reader should be able to check our coverage claim
+# without first running a four-minute crawl.
+DEFAULT_SUMMARY_PATH = Path("docs/coverage.md")
+
+# Not committed. Several megabytes, and a nightly run would produce thousands
+# of diff lines nobody reads. `.cache/` is already ignored.
+DEFAULT_CORPUS_PATH = Path(".cache/corpus.json")
+
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="mcp-observatory",
-        description="Scan an MCP server's source without running any of it.",
+        description="Study MCP servers without running any of them.",
     )
-    source = parser.add_mutually_exclusive_group(required=True)
+    subcommands = parser.add_subparsers(dest="command", required=True)
+
+    scan = subcommands.add_parser("scan", help="Scan one server's source.")
+    source = scan.add_mutually_exclusive_group(required=True)
     source.add_argument("--path", help="Scan a directory already on disk.")
     source.add_argument("--repo-url", help="Clone a repository read-only, then scan it.")
-    parser.add_argument(
+    scan.add_argument(
         "--server-id", required=True, help="Identifier for the server, e.g. owner/repo."
     )
+
+    crawl = subcommands.add_parser(
+        "crawl", help="Read the registry and record what we will scan."
+    )
+    crawl.add_argument(
+        "--summary", default=str(DEFAULT_SUMMARY_PATH), help="Where to write the summary."
+    )
+    crawl.add_argument(
+        "--corpus", default=str(DEFAULT_CORPUS_PATH), help="Where to write the full corpus."
+    )
+
     return parser
 
 
-def main(argv: list[str] | None = None) -> int:
-    args = _build_parser().parse_args(argv)
+def run_crawl(
+    *,
+    fetch: Callable[[str], JsonObject],
+    now: Callable[[], datetime],
+    summary_path: Path,
+    corpus_path: Path,
+) -> Coverage:
+    """Read the whole registry, then write the summary and the corpus.
 
-    try:
-        if args.path:
-            root = Path(args.path)
-            if not root.is_dir():
-                raise NotADirectoryError(f"{args.path} is not a directory")
-            commit_sha = LOCAL_SCAN_SHA
-            findings: list[Finding] = scan_directory(root, args.server_id, commit_sha)
-        else:
-            # TemporaryDirectory removes the clone on the way out, on success
-            # and on failure alike. The fetcher cleans up after its own
-            # failures; this covers the successful path, which the fetcher
-            # cannot, because the caller needs those files to scan.
-            with tempfile.TemporaryDirectory() as workdir:
-                result = shallow_clone(args.repo_url, Path(workdir) / "repo")
-                commit_sha = result.commit_sha
-                findings = scan_directory(result.path, args.server_id, commit_sha)
-    except (FetchError, OSError, subprocess.SubprocessError) as exc:
-        # Expected failures: a refused URL, a repository over the caps, a
-        # missing directory, git exiting non-zero or timing out. Each is
-        # reported as a sentence rather than a traceback, and nothing is
-        # written to stdout, so a caller parsing the output never receives a
-        # partial document.
-        print(f"mcp-observatory: {exc}", file=sys.stderr)
-        return EXIT_SCAN_FAILED
+    Nothing is written until the crawl has completed. The summary is a
+    published claim, and replacing it with the results of a run that died
+    halfway would understate the ecosystem while looking exactly like the
+    ecosystem having shrunk.
+
+    `fetch` and `now` are injected for the same reason they are everywhere
+    else here: a test of this function should not need a network or a
+    particular date, and a timestamp nobody controls cannot be asserted.
+    """
+    crawl = crawl_registry(fetch)
+    coverage = Coverage.from_crawl(crawl, crawled_at=_stamp(now()))
+
+    summary_path.parent.mkdir(parents=True, exist_ok=True)
+    summary_path.write_text(render_coverage(coverage), encoding="utf-8")
+    write_corpus(corpus_path, coverage)
+    return coverage
+
+
+def _stamp(moment: datetime) -> str:
+    """Render an instant as UTC, to the second.
+
+    Microseconds would make a committed document churn on sub-second noise,
+    and a naive local time would make two machines disagree about when the
+    same registry was read.
+    """
+    return moment.astimezone(UTC).replace(microsecond=0).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _scan(args: argparse.Namespace) -> int:
+    if args.path:
+        root = Path(args.path)
+        if not root.is_dir():
+            raise NotADirectoryError(f"{args.path} is not a directory")
+        commit_sha = LOCAL_SCAN_SHA
+        findings: list[Finding] = scan_directory(root, args.server_id, commit_sha)
+    else:
+        # TemporaryDirectory removes the clone on the way out, on success
+        # and on failure alike. The fetcher cleans up after its own
+        # failures; this covers the successful path, which the fetcher
+        # cannot, because the caller needs those files to scan.
+        with tempfile.TemporaryDirectory() as workdir:
+            result = shallow_clone(args.repo_url, Path(workdir) / "repo")
+            commit_sha = result.commit_sha
+            findings = scan_directory(result.path, args.server_id, commit_sha)
 
     json.dump(
         {
@@ -76,6 +129,40 @@ def main(argv: list[str] | None = None) -> int:
     )
     sys.stdout.write("\n")
     return 0
+
+
+def _crawl(args: argparse.Namespace) -> int:
+    coverage = run_crawl(
+        fetch=http_fetch,
+        now=lambda: datetime.now(UTC),
+        summary_path=Path(args.summary),
+        corpus_path=Path(args.corpus),
+    )
+    corpus = coverage.corpus
+    print(
+        f"{coverage.entries_seen} registry entries, "
+        f"{coverage.skipped_without_source} with no source, "
+        f"{corpus.entries_collapsed} collapsed, "
+        f"{corpus.repository_count} repositories to scan",
+        file=sys.stderr,
+    )
+    return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = _build_parser().parse_args(argv)
+
+    try:
+        return _scan(args) if args.command == "scan" else _crawl(args)
+    except (FetchError, FetchFailed, RegistryError, OSError, subprocess.SubprocessError) as exc:
+        # Expected failures: a refused URL, a repository over the caps, a
+        # missing directory, git exiting non-zero or timing out, an
+        # unreachable registry, a registry whose shape changed. Each is
+        # reported as a sentence rather than a traceback, and nothing is
+        # written to stdout, so a caller parsing the output never receives a
+        # partial document.
+        print(f"mcp-observatory: {exc}", file=sys.stderr)
+        return EXIT_SCAN_FAILED
 
 
 if __name__ == "__main__":

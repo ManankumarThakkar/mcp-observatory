@@ -25,11 +25,15 @@ REGISTRY_ENDPOINT = "https://registry.modelcontextprotocol.io/v0/servers"
 # whether its caller trusted the URL.
 ALLOWED_REPOSITORY_SCHEME = "https"
 
-# The registry holds every published version of every server. Measured over 600
-# live entries: 190 distinct servers, so most of a naive crawl is older
-# versions of servers already seen. Asking the API for latest only is cheaper
-# than paging through duplicates and discarding them here, and removes the
-# deduplication logic entirely.
+# The registry holds every published version of every server, so the crawl asks
+# for latest only.
+#
+# This was once documented as removing deduplication entirely. It does not, and
+# the correction matters. Measured on 2026-09-21, version=latest returns 25,983
+# entries carrying a repository and 20,792 distinct repositories. The remaining
+# duplication is not versions of one server; it is thousands of separately
+# registered names pointing at the same code. Collapsing that is `corpus.py`,
+# and the API cannot do it for us.
 PAGE_SIZE = 100
 
 
@@ -68,6 +72,22 @@ class ServerRecord:
     discovered_via: str
 
 
+@dataclass(frozen=True)
+class Crawl:
+    """One complete pass over the registry, including what it declined.
+
+    `skipped_without_source` is the reason this type exists. 7,941 of 33,924
+    entries carry no repository a static analyser could read, measured over
+    the whole registry on 2026-09-21. Skipping them is correct and is not an
+    error, but a published coverage figure that does not say how many entries
+    were never eligible is a claim about a denominator the reader cannot see.
+    """
+
+    records: tuple[ServerRecord, ...]
+    entries_seen: int
+    skipped_without_source: int
+
+
 def _page_url(cursor: str | None) -> str:
     """Build the URL for one page.
 
@@ -81,15 +101,11 @@ def _page_url(cursor: str | None) -> str:
     return url
 
 
-def iter_servers(
-    fetch: Callable[[str], JsonObject], *, max_pages: int = 2000
-) -> Iterator[ServerRecord]:
-    """Yield one record per registry entry.
+def _iter_pages(fetch: Callable[[str], JsonObject], max_pages: int) -> Iterator[JsonObject]:
+    """Yield each page of the registry, following its cursor to the end.
 
-    `fetch` takes a URL and returns decoded JSON. Every piece of registry
-    knowledge stays in this module, so `fetch` is only ever "GET this, give me
-    JSON", which is what keeps the network out of the tests and matches the
-    signature the real HTTP client will have.
+    Pagination lives here alone so the two public entry points below cannot
+    drift apart in how they decide a crawl is complete.
     """
     cursor: str | None = None
     seen_cursors: set[str] = set()
@@ -110,7 +126,7 @@ def iter_servers(
     # actually happened.
     for _ in range(max_pages):
         payload = fetch(_page_url(cursor))
-        yield from _records_in(payload)
+        yield payload
 
         # `metadata` may be absent or explicitly null, both meaning no further
         # pages. Assuming a dict here raised AttributeError after the page's
@@ -136,7 +152,61 @@ def iter_servers(
     )
 
 
-def _records_in(payload: JsonObject) -> Iterator[ServerRecord]:
+def iter_servers(
+    fetch: Callable[[str], JsonObject], *, max_pages: int = 2000
+) -> Iterator[ServerRecord]:
+    """Yield one record per usable registry entry, streaming.
+
+    `fetch` takes a URL and returns decoded JSON. Every piece of registry
+    knowledge stays in this module, so `fetch` is only ever "GET this, give me
+    JSON", which is what keeps the network out of the tests and matches the
+    signature `http_fetch` has.
+
+    Use `crawl_registry` when the count of skipped entries is needed. This
+    remains because it is the honest primitive: it never holds the whole
+    registry in memory, and the pagination and structure failures are most
+    readable when tested through it.
+    """
+    for payload in _iter_pages(fetch, max_pages):
+        for record in _entries_in(payload):
+            if record is not None:
+                yield record
+
+
+def crawl_registry(fetch: Callable[[str], JsonObject], *, max_pages: int = 2000) -> Crawl:
+    """Read the whole registry and report both what it gave and what it withheld.
+
+    The eligible records and the skipped count come from one pass over one
+    decision, so the published coverage figure and the scanned set can never
+    describe different crawls.
+    """
+    records: list[ServerRecord] = []
+    entries_seen = 0
+    skipped = 0
+
+    for payload in _iter_pages(fetch, max_pages):
+        for record in _entries_in(payload):
+            entries_seen += 1
+            if record is None:
+                skipped += 1
+            else:
+                records.append(record)
+
+    return Crawl(
+        records=tuple(records),
+        entries_seen=entries_seen,
+        skipped_without_source=skipped,
+    )
+
+
+def _entries_in(payload: JsonObject) -> Iterator[ServerRecord | None]:
+    """Yield one item per registry entry: a record, or None if unusable.
+
+    Yielding None rather than skipping silently is what lets the caller count.
+    A filter that drops entries inside the parser leaves no way to distinguish
+    a registry with few source-bearing servers from a parser that stopped
+    recognising them.
+    """
     entries = payload.get("servers")
     if not isinstance(entries, list):
         raise RegistryError(f"registry payload has no 'servers' list: {sorted(payload)}")
@@ -150,16 +220,13 @@ def _records_in(payload: JsonObject) -> Iterator[ServerRecord]:
         if not name:
             raise RegistryError(f"registry entry has no name: {str(server)[:120]}")
 
-        # Roughly a third of the registry is hosted servers reached over HTTP,
-        # which carry `remotes` and no repository. There is no source for a
-        # static analyser to read, so they are skipped. Measured at 199 of 600
-        # sampled entries, so this is the ordinary case rather than an error.
-        # Absent means this server has no source to read, which is about a
-        # third of the registry. Present means the registry is telling us where
-        # the source is, and it must then actually say where.
-        if "repository" not in server or server["repository"] is None:
-            continue
-        repository = server["repository"]
+        # Many registry entries are hosted servers reached over HTTP, which
+        # carry `remotes` and no repository. There is no source for a static
+        # analyser to read, so they are skipped: the ordinary case rather than
+        # an error. An early 600-entry sample put this at a third; the whole
+        # registry puts it at 7,941 of 33,924, or 23%. The sample was small
+        # and the figure it produced travelled further than it deserved.
+        repository = server.get("repository")
 
         # Missing key versus empty value is the line between structure and
         # content. No "url" key at all means the response is not shaped the way
@@ -184,9 +251,11 @@ def _records_in(payload: JsonObject) -> Iterator[ServerRecord]:
         # thousands can. Filed against Task 12.
         repo_url = repository.get("url") if isinstance(repository, dict) else None
         if not isinstance(repo_url, str) or not repo_url:
+            yield None
             continue
 
         if urlparse(repo_url).scheme != ALLOWED_REPOSITORY_SCHEME:
+            yield None
             continue
 
         yield ServerRecord(

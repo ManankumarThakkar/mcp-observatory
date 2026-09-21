@@ -9,6 +9,7 @@ from analyzer.crawler.registry import (
     JsonObject,
     RegistryError,
     ServerRecord,
+    crawl_registry,
     iter_servers,
 )
 
@@ -293,3 +294,48 @@ def test_a_cursor_that_is_not_a_string_stops_the_run() -> None:
 
     with pytest.raises(RegistryError, match="cursor"):
         list(iter_servers(fetch))
+
+
+def test_a_crawl_reports_what_it_skipped() -> None:
+    """Silently dropped entries cannot be published as coverage.
+
+    Roughly a third of the registry is hosted servers with no source to read.
+    That is the ordinary case rather than an error, but a coverage claim that
+    does not say how many entries were never eligible is a claim about a
+    denominator nobody can see.
+    """
+    crawl = crawl_registry(_one_page(REGISTRY_PAGE))
+
+    assert crawl.entries_seen == 4
+    assert crawl.skipped_without_source == 1
+    assert [record.server_id for record in crawl.records] == [
+        "ac.tandem/docs-mcp",
+        "agency.goji/goji",
+        "ai.feedback1/mcp",
+    ]
+
+
+def test_skipping_counts_every_unusable_repository_shape() -> None:
+    """Absent, null, not a dict, no url, empty url and non-https all count.
+
+    A live crawl of 2,000 entries held 50 repositories that are a dict with no
+    url key, so these are ordinary records rather than hypotheticals.
+    """
+    page = {
+        "servers": [
+            {"server": {"name": "a/none"}},
+            {"server": {"name": "b/null", "repository": None}},
+            {"server": {"name": "c/notdict", "repository": "https://github.com/x/y"}},
+            {"server": {"name": "d/nourl", "repository": {}}},
+            {"server": {"name": "e/empty", "repository": {"url": ""}}},
+            {"server": {"name": "f/ssh", "repository": {"url": "git@github.com:x/y"}}},
+            {"server": {"name": "g/ok", "repository": {"url": "https://github.com/x/y"}}},
+        ],
+        "metadata": {"nextCursor": None},
+    }
+
+    crawl = crawl_registry(lambda url: page)
+
+    assert crawl.entries_seen == 7
+    assert crawl.skipped_without_source == 6
+    assert len(crawl.records) == 1
