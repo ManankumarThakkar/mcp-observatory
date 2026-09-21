@@ -3,7 +3,7 @@ from importlib.metadata import version
 import analyzer
 
 
-def test_version_is_derived_from_installed_distribution_metadata():
+def test_version_is_derived_from_installed_distribution_metadata() -> None:
     """The version is declared once, in pyproject.toml.
 
     Comparing the module attribute against the distribution metadata fails the

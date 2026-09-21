@@ -76,7 +76,7 @@ class Finding:
         ]
         return hashlib.sha256("|".join(parts).encode("utf-8")).hexdigest()
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, object]:
         """Render the subset of spec section 8 that this plan produces.
 
         `triage`, `first_seen`, `last_seen` and `disclosure_state` are absent

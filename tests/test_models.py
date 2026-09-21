@@ -1,5 +1,5 @@
 import json
-from typing import get_args
+from typing import cast, get_args
 
 import pytest
 
@@ -18,22 +18,25 @@ def _finding(
         server_id="owner/repo",
         commit_sha="a" * 40,
         rule_id="UNICODE-CONCEAL",
-        severity=severity,
-        confidence=confidence,
+        # str rather than Severity/Confidence on purpose: the validation tests
+        # pass values the Literal forbids, which is the point of the runtime
+        # guard. The cast marks that bypass as deliberate and confined to tests.
+        severity=cast(Severity, severity),
+        confidence=cast(Confidence, confidence),
         location=Location(file=file, line=line),
         evidence=evidence,
     )
 
 
-def test_finding_id_is_stable_for_identical_input():
+def test_finding_id_is_stable_for_identical_input() -> None:
     assert _finding().finding_id == _finding().finding_id
 
 
-def test_finding_id_changes_when_evidence_changes():
+def test_finding_id_changes_when_evidence_changes() -> None:
     assert _finding("one").finding_id != _finding("two").finding_id
 
 
-def test_finding_id_resists_delimiter_injection_from_a_hostile_repository():
+def test_finding_id_resists_delimiter_injection_from_a_hostile_repository() -> None:
     """Two different findings must not share an identity.
 
     Both the file path and the evidence come from a repository we do not
@@ -49,7 +52,7 @@ def test_finding_id_resists_delimiter_injection_from_a_hostile_repository():
     assert a.finding_id != b.finding_id
 
 
-def test_to_dict_renders_the_documented_schema():
+def test_to_dict_renders_the_documented_schema() -> None:
     """Pins the subset of spec section 8 that this plan produces.
 
     The four fields filled by later layers (triage, first_seen, last_seen,
@@ -72,25 +75,25 @@ def test_to_dict_renders_the_documented_schema():
     assert payload["location"] == {"file": "src/index.ts", "line": 42}
 
 
-def test_to_dict_is_json_serialisable():
+def test_to_dict_is_json_serialisable() -> None:
     """A finding that cannot be written to findings.jsonl is not a finding."""
     payload = _finding().to_dict()
 
     assert json.loads(json.dumps(payload)) == payload
 
 
-def test_unknown_severity_is_rejected_at_construction():
+def test_unknown_severity_is_rejected_at_construction() -> None:
     """A typo must fail loudly here rather than become a wrong SARIF level."""
     with pytest.raises(ValueError, match="severity"):
         _finding(severity="hgh")
 
 
-def test_unknown_confidence_is_rejected_at_construction():
+def test_unknown_confidence_is_rejected_at_construction() -> None:
     with pytest.raises(ValueError, match="confidence"):
         _finding(confidence="certain")
 
 
-def test_every_declared_severity_and_confidence_is_accepted():
+def test_every_declared_severity_and_confidence_is_accepted() -> None:
     """A guard that rejects valid input is worse than no guard.
 
     Driven from the Literal declarations, so widening either type cannot
