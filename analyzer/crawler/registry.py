@@ -100,9 +100,25 @@ def iter_servers(
         payload = fetch(_page_url(cursor))
         yield from _records_in(payload)
 
-        cursor = payload.get("metadata", {}).get("nextCursor")
+        # `metadata` may be absent or explicitly null, both meaning no further
+        # pages. Assuming a dict here raised AttributeError after the page's
+        # records had already been yielded.
+        metadata = payload.get("metadata")
+        cursor = metadata.get("nextCursor") if isinstance(metadata, dict) else None
         if not cursor:
             return
+        if not isinstance(cursor, str):
+            raise RegistryError(f"registry returned a non-string cursor: {cursor!r}")
+
+    # Falling out of the loop means pages remain. Returning quietly here would
+    # publish a truncated index that reads exactly like a complete one, which
+    # is the failure this module raises for elsewhere. Either the cursor is
+    # stuck, which is the bug the limit exists to bound, or the registry has
+    # outgrown the limit. Both need saying.
+    raise RegistryError(
+        f"stopped after max_pages={max_pages} with a cursor still outstanding; "
+        "the crawl is incomplete"
+    )
 
 
 def _records_in(payload: JsonObject) -> Iterator[ServerRecord]:
@@ -123,19 +139,34 @@ def _records_in(payload: JsonObject) -> Iterator[ServerRecord]:
         # which carry `remotes` and no repository. There is no source for a
         # static analyser to read, so they are skipped. Measured at 199 of 600
         # sampled entries, so this is the ordinary case rather than an error.
-        repository = server.get("repository")
-        if not repository:
+        # Absent means this server has no source to read, which is about a
+        # third of the registry. Present means the registry is telling us where
+        # the source is, and it must then actually say where.
+        if "repository" not in server or server["repository"] is None:
             continue
+        repository = server["repository"]
 
         # Missing key versus empty value is the line between structure and
         # content. No "url" key at all means the response is not shaped the way
         # it was, which affects every entry. A key holding an empty string is
         # one bad record, and it falls through to the scheme check below like
         # any other URL that is not https.
-        if not isinstance(repository, dict) or "url" not in repository:
-            raise RegistryError(f"{name} has a repository with no url: {str(repository)[:120]}")
-
-        repo_url = repository["url"]
+        # Every way of having no usable url is the same case: {}, a source
+        # with no url, an empty string, a non-string. The registry is claiming
+        # a repository and then declining to say where, which is the response
+        # contradicting itself rather than a fact about one server.
+        #
+        # This is deliberately fatal, and it does mean one bad record ends a
+        # crawl. Accepted: the registry is a curated service, a live crawl of
+        # 357 servers produced none of these, and the alternative is a
+        # regression emitting them everywhere being reported as a successful
+        # scan of an empty ecosystem. A URL that exists but names a transport
+        # we refuse is different, and is skipped below.
+        repo_url = repository.get("url") if isinstance(repository, dict) else None
+        if not isinstance(repo_url, str) or not repo_url:
+            raise RegistryError(
+                f"{name} has a repository with no usable url: {str(repository)[:120]}"
+            )
 
         if urlparse(repo_url).scheme != ALLOWED_REPOSITORY_SCHEME:
             continue
