@@ -1,6 +1,7 @@
 """Retrieve a repository for static analysis, without ever running it."""
 
 import os
+import shutil
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -25,6 +26,10 @@ class UnsupportedRepositoryURL(Exception):
 
 class CloneTooLarge(Exception):
     """Raised when a cloned repository exceeds the configured resource caps."""
+
+
+class DestinationNotEmpty(Exception):
+    """Raised when the target directory already holds something."""
 
 
 @dataclass(frozen=True)
@@ -94,6 +99,24 @@ def _git(args: list[str], *, cwd: Path, timeout_s: int) -> "subprocess.Completed
     )
 
 
+def _require_empty_destination(dest: Path) -> None:
+    """Refuse a destination that already holds something.
+
+    Git would otherwise fail inside `git remote add` with exit 128 and a
+    message naming an internal command, which across a nightly run over a
+    thousand repositories is far harder to diagnose than a sentence saying
+    what is wrong. Requiring an empty directory also removes any chance of
+    measuring, or later scanning, content left by an earlier run as though it
+    had just been fetched.
+    """
+    if dest.exists() and any(dest.iterdir()):
+        raise DestinationNotEmpty(
+            f"refusing to clone into {dest}: the directory is not empty. "
+            "Each clone needs a fresh directory, so that nothing left by an "
+            "earlier run can be mistaken for what was just fetched."
+        )
+
+
 def _fetched_bytes(dest: Path) -> int:
     """Size of the object store after fetch, before a working tree exists."""
     objects = dest / ".git" / "objects"
@@ -148,21 +171,34 @@ def shallow_clone(repo_url: str, dest: Path, *, timeout_s: int = 60) -> CloneRes
     to.
     """
     _require_supported_url(repo_url)
+    _require_empty_destination(dest)
 
     dest.mkdir(parents=True, exist_ok=True)
-    _git(["init", "-q"], cwd=dest, timeout_s=timeout_s)
-    _git(["remote", "add", "origin", repo_url], cwd=dest, timeout_s=timeout_s)
-    _git(["fetch", "--depth", "1", "-q", "origin", "HEAD"], cwd=dest, timeout_s=timeout_s)
+    try:
+        _git(["init", "-q"], cwd=dest, timeout_s=timeout_s)
+        _git(["remote", "add", "origin", repo_url], cwd=dest, timeout_s=timeout_s)
+        _git(["fetch", "--depth", "1", "-q", "origin", "HEAD"], cwd=dest, timeout_s=timeout_s)
 
-    # Checked before checkout. At this point the repository is on disk once;
-    # after checkout it is on disk twice. Aborting here halves what an
-    # oversized repository costs us.
-    fetched = _fetched_bytes(dest)
-    if fetched > MAX_BYTES:
-        raise CloneTooLarge(f"fetched {fetched} bytes, exceeded {MAX_BYTES} bytes")
+        # Checked before checkout. At this point the repository is on disk
+        # once; after checkout it is on disk twice. Aborting here halves what
+        # an oversized repository costs us.
+        fetched = _fetched_bytes(dest)
+        if fetched > MAX_BYTES:
+            raise CloneTooLarge(f"fetched {fetched} bytes, exceeded {MAX_BYTES} bytes")
 
-    _git(["checkout", "-q", "FETCH_HEAD"], cwd=dest, timeout_s=timeout_s)
-    _enforce_caps(dest)
+        _git(["checkout", "-q", "FETCH_HEAD"], cwd=dest, timeout_s=timeout_s)
+        _enforce_caps(dest)
 
-    sha = _git(["rev-parse", "HEAD"], cwd=dest, timeout_s=timeout_s).stdout.strip()
+        sha = _git(["rev-parse", "HEAD"], cwd=dest, timeout_s=timeout_s).stdout.strip()
+    except BaseException:
+        # Anything that goes wrong leaves a partial clone behind, and a nightly
+        # run over a thousand repositories would fill the volume with debris
+        # from the failures long before anyone read the individual errors.
+        # BaseException rather than Exception because a timeout or an interrupt
+        # leaves the most on disk, and it is re-raised immediately either way.
+        # The destination was required to be empty, so nothing removed here
+        # belonged to the caller.
+        shutil.rmtree(dest, ignore_errors=True)
+        raise
+
     return CloneResult(path=dest, commit_sha=sha)

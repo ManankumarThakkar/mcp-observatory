@@ -8,6 +8,7 @@ import pytest
 
 from analyzer.fetcher.clone import (
     CloneTooLarge,
+    DestinationNotEmpty,
     UnsupportedRepositoryURL,
     shallow_clone,
 )
@@ -257,3 +258,60 @@ def test_the_timeout_is_applied_to_every_git_invocation(
 
     assert timeouts, "expected at least one git invocation"
     assert set(timeouts) == {37}, timeouts
+
+
+def test_a_non_empty_destination_is_refused_before_any_subprocess_starts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A clean error beats a raw CalledProcessError from `git remote add`.
+
+    Reusing a directory previously died inside git with exit 128 and a message
+    naming an internal command, which across a thousand-repository nightly run
+    is a great deal harder to diagnose than a sentence saying what is wrong.
+    """
+    dest = tmp_path / "work"
+    dest.mkdir()
+    (dest / "left over from an earlier run.txt").write_text("stale", encoding="utf-8")
+
+    def forbidden(*args: Any, **kwargs: Any) -> Any:
+        raise AssertionError("a subprocess started despite a non-empty destination")
+
+    monkeypatch.setattr(subprocess, "run", forbidden)
+
+    with pytest.raises(DestinationNotEmpty, match="not empty"):
+        shallow_clone("https://example.com/owner/repo.git", dest)
+
+
+def test_a_failed_clone_removes_the_directory_it_created(
+    origin_repo: tuple[Path, str], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A nightly run over a thousand repositories cannot leave debris behind.
+
+    Without this, every repository that trips a cap or errors mid-fetch leaves
+    a partial clone on disk, and the run fills the volume long before anyone
+    notices the individual failures.
+    """
+    repo, _ = origin_repo
+    dest = tmp_path / "work"
+    monkeypatch.setattr("analyzer.fetcher.clone.MAX_FILES", 0)
+
+    with pytest.raises(CloneTooLarge):
+        shallow_clone(_url(repo), dest)
+
+    assert not dest.exists(), "a failed clone left its directory behind"
+
+
+def test_a_successful_clone_keeps_its_directory(
+    origin_repo: tuple[Path, str], tmp_path: Path
+) -> None:
+    """The counterpart to the test above: cleanup must not be over-eager.
+
+    The caller scans these files, so success has to hand the path over intact.
+    """
+    repo, _ = origin_repo
+    dest = tmp_path / "work"
+
+    result = shallow_clone(_url(repo), dest)
+
+    assert result.path.exists()
+    assert (result.path / "server.py").exists()
