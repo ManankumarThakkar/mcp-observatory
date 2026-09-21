@@ -42,14 +42,33 @@ accuracy beside it. If the tool is wrong fifteen percent of the time, the
 dashboard says fifteen percent. Serious findings go privately to maintainers
 first, and a maintainer who asks to be excluded is excluded.
 
-## Why measure the scanner
+## What is different about this one
 
-Plenty of tools will scan a repository. Very few will tell you how often they
-are wrong.
+Other MCP scanners exist, and some are good. They will read a server you point
+them at and tell you what looks wrong. Three things are missing from the field.
 
-That measurement is the point of this project. A scanner whose error rate
-nobody knows is an opinion, not evidence. A result showing the ecosystem is
-healthier than reported is just as publishable as an alarming one.
+**Accuracy measured on a random sample.** Where scanners report accuracy at all,
+it is usually measured against a set of examples the authors chose themselves,
+which mostly shows whether the rules match the cases they were written from. The
+golden set here is sampled at random from real findings across the whole scanned
+corpus, and the sampling method is published next to the numbers. Expect a figure
+well below perfect. That is the point: a scanner whose error rate nobody knows is
+an opinion, and a perfect score is usually a sign that the measurement was
+circular.
+
+**A trend over time.** Existing tools give a snapshot. Nobody can currently
+answer whether this ecosystem is getting safer or worse. This runs nightly and
+keeps the history, so the question becomes answerable.
+
+**Disclosure before publication.** Serious findings are withheld for ninety days
+and sent privately to the maintainer first, enforced in code rather than promised
+in a policy document. Scanning someone's project and publishing the result
+carries an obligation, and that obligation should be executable.
+
+The labeled corpus itself is published as an open benchmark with a scoring
+script, so any scanner can be measured on the same footing rather than each
+quoting a number from its own private collection. A result showing the ecosystem
+is healthier than reported is just as publishable as an alarming one.
 
 ## How it works
 
