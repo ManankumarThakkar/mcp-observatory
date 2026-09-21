@@ -15,8 +15,12 @@ Cursor, Claude Code, Gemini CLI, Copilot and Amazon Q auto-execute
 project-defined servers with the developer's OS privileges and no process
 isolation.
 
-The official registry held 9,652 servers as of May 2026. No continuously
-updated, independently measured public risk index exists for that corpus.
+The official registry held 9,652 servers as of May 2026. A crawl on 2026-09-21
+returned **25,977 servers carrying a source repository**, with roughly a
+further third of entries being hosted servers that expose no source at all. No
+continuously updated, independently measured public risk index exists for that
+corpus, and it is growing fast enough that any figure here should be read with
+its date.
 
 ## 2. What we are building
 
@@ -229,7 +233,15 @@ passing it.
 - **Estimated run cost:** the first full scan is the only expensive one. At a
   v1 target of ~1,000 servers averaging roughly two semantic findings each,
   that is ~2,000 uncached triage calls of a few hundred tokens apiece - low
-  single-digit dollars on Haiku. Subsequent nightly runs approach zero, because
+  single-digit dollars on Haiku.
+- **The corpus is larger than this estimate assumes.** A crawl on 2026-09-21
+  found 25,977 servers with source, against the ~1,000 in the v1 target. At two
+  semantic findings each that is ~52,000 triage calls, well past the 3,000-call
+  spend guard below. v1 therefore scans a **sample** of the corpus rather than
+  all of it, and the sampling method is published alongside the results for the
+  same reason the golden set's is (see `DECISIONS.md` D7). Scanning everything
+  is a scale problem to solve after the measurement is trustworthy, not
+  before. Subsequent nightly runs approach zero, because
   `finding_id` is deterministic and the cache absorbs every unchanged finding.
 - **Hard spend guard:** the triage layer enforces a configurable maximum of
   3,000 model calls per run. Exceeding it stops adjudication, marks the
