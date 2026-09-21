@@ -3,8 +3,11 @@ from collections.abc import Callable
 import pytest
 
 from analyzer.crawler.github import (
+    DEFAULT_MAX_REQUESTS,
     MAX_PAGES,
     RESULTS_PER_PAGE,
+    SEARCH_QUERIES,
+    SIZE_BUCKETS,
     GitHubSearchError,
     iter_discoveries,
 )
@@ -131,3 +134,20 @@ def test_a_response_without_items_is_fatal() -> None:
     """
     with pytest.raises(GitHubSearchError, match="items"):
         list(iter_discoveries(lambda q, p: {"message": "rate limited"}, max_requests=1))
+
+
+def test_the_default_plan_can_actually_spend_the_default_budget() -> None:
+    """A budget the plan cannot reach is not a budget, it is a decoration.
+
+    Each query-and-bucket pair serves at most MAX_PAGES requests, so the plan
+    has a hard ceiling whatever the budget says. A live run with four buckets
+    spent 80 of its 200 allowed requests and stopped, because the plan ran out
+    rather than the allowance, and the sample was a third of what the same
+    twenty minutes could have produced. Nothing in the code said so.
+    """
+    reachable = len(SEARCH_QUERIES) * len(SIZE_BUCKETS) * MAX_PAGES
+
+    assert reachable >= DEFAULT_MAX_REQUESTS, (
+        f"the plan tops out at {reachable} requests but the budget allows "
+        f"{DEFAULT_MAX_REQUESTS}; add buckets or lower the budget"
+    )

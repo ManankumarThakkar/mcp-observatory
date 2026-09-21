@@ -31,15 +31,32 @@ SEARCH_QUERIES: tuple[str, ...] = (
 # reaches past the cap: the three ranges below divide that query into roughly
 # 14,800, 71,200 and 20,500 files, measured rather than guessed.
 #
-# These are deliberately coarse. Fine enough buckets to enumerate everything
-# would need 150 to 300 of them, which is 2.5 to 5 hours at ten requests a
-# minute, against a six-hour job limit that still has to scan what it finds.
-# A bounded pass that rotates is worth more than an exhaustive one that never
-# finishes.
+# The count is chosen to spend the budget, which an earlier four-bucket list
+# did not. Each bucket serves at most 1,000 results, so a query crossed with
+# four buckets tops out at 40 requests and two queries at 80. A live run spent
+# exactly that and stopped, leaving 60% of the allowance unused, because the
+# plan ran out rather than the budget. Ten buckets across two queries is 200
+# requests, which is the budget exactly.
+#
+# They stay uneven on purpose. The ranges are narrow where files cluster:
+# 71,168 of the npm query's matches fall between 500 and 2,000 bytes against
+# 14,816 below 500, so an evenly spaced list would waste requests on empty
+# ranges and cap out inside the crowded one.
+#
+# Enumerating everything would need 150 to 300 buckets, which is 2.5 to 5
+# hours at ten requests a minute, against a six-hour job limit that still has
+# to scan what it finds. A bounded pass that rotates is worth more than an
+# exhaustive one that never finishes.
 SIZE_BUCKETS: tuple[str, ...] = (
-    "size:0..500",
-    "size:500..2000",
-    "size:2000..10000",
+    "size:0..200",
+    "size:200..500",
+    "size:500..800",
+    "size:800..1100",
+    "size:1100..1400",
+    "size:1400..1700",
+    "size:1700..2000",
+    "size:2000..3500",
+    "size:3500..10000",
     "size:10000..100000",
 )
 
