@@ -38,13 +38,11 @@ dashboard.
 
 | Constraint | Value |
 |---|---|
-| Time budget | 5–8 hrs/week, ~6 weeks to v1 |
-| Monthly cost ceiling | $20–30 |
-| Hosting | Render free tier (static site) |
-| Repo visibility | Private until launch |
+| Hosting | Static site, free tier |
 | Analyzer language | Python 3.11+, tree-sitter |
 | Triage model | `claude-haiku-4-5-20251001` |
-| Legal | No employer IP; clean-room from public sources only |
+| Runtime dependencies | tree-sitter and its grammars only |
+| Source material | Public repositories only |
 
 ## 5. Architecture
 
@@ -128,8 +126,8 @@ path from tool input to the dangerous sink is direct, and is routed to the model
 only when the path is indirect (passes through a helper, a conditional, or a
 reassignment). Direct cases never spend a model call.
 
-Five rules, deliberately. The hour budget does not support more at the required
-measurement quality. `SCOPE-OVERBROAD` is the first to cut if time runs short.
+Five rules, deliberately. More rules than can be held to the required
+measurement quality is worse than fewer. `SCOPE-OVERBROAD` is the first to cut if time runs short.
 
 ## 8. Finding schema
 
@@ -214,22 +212,19 @@ passing it.
   3,000 model calls per run. Exceeding it stops adjudication, marks the
   remainder `uncertain`, and completes the run rather than silently spending.
 
-## 13. Timeline
+## 13. Delivery phases
 
-Six weeks at 5–8 hrs/week.
+Each phase produces something that works on its own.
 
-| Week | Focus | Hrs | Done when |
-|---|---|---|---|
-| 1 | Crawler + fetcher | 7 | N servers pulled to disk at pinned SHAs |
-| 2 | Rules engine + `UNICODE-CONCEAL`, `PATH-TRAVERSAL` + fixtures | 8 | Real findings on real servers, tests green |
-| 3 | `TOOL-DESC-INJECTION`, `SHELL-EXEC-UNSAFE`, `SCOPE-OVERBROAD` + SARIF | 8 | All five rules passing fixtures |
-| 4 | Triage layer + cache; begin golden labeling | 7 | Adjudicated findings, cache hit on rerun |
-| 5 | Eval harness + CI gate + first full ecosystem scan | 7 | Published precision per rule |
-| 6 | Dashboard + deploy + README, DECISIONS, writeup | 8 | Live public URL |
+| Phase | Scope | Complete when |
+|---|---|---|
+| 1 | Analyzer core: fetcher, rule engine, first rule, CLI | The CLI emits valid JSON for a real server repository |
+| 2 | Ecosystem scan: crawler, tree-sitter, remaining four rules, SARIF, disclosure gate, time series | A full corpus scan writes gated, merged results |
+| 3 | Triage and measurement: model adjudication, cache, eval harness, CI regression gate | Per-rule precision is measured against the golden set |
+| 4 | Publication: dashboard, deploy, writeup | A live public URL with more than one point in the time series |
 
-**Honest total: ~45 hours against a ~40 hour budget.** Plan for seven weeks. If
-week 6 arrives short, cut `SCOPE-OVERBROAD` (§7) rather than the eval harness —
-the measurement is the differentiator, a fifth rule is not.
+If a phase runs short, `SCOPE-OVERBROAD` (§7) is cut before the eval harness.
+The measurement is the differentiator; a fifth rule is not.
 
 ## 14. Risks
 
@@ -246,6 +241,9 @@ the measurement is the differentiator, a fifth rule is not.
 **v1 ships when:**
 1. A public URL shows scan results across at least 1,000 real servers.
 2. Per-rule precision is measured against the golden set and published.
+2a. Per-language coverage is stated alongside every aggregate figure. The
+    four tree-sitter rules cover Python in v1 (see `DECISIONS.md` D6); a
+    Python-derived percentage is never presented as an ecosystem-wide one.
 3. The nightly job runs unattended and the time series has more than one point.
 4. `SECURITY.md` is live and the disclosure gate is enforced in code.
 5. A technical writeup explains the architecture, the measured accuracy, and the
