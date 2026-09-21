@@ -6,7 +6,7 @@ from collections.abc import Callable, Mapping
 
 import pytest
 
-from analyzer.crawler.http import FetchFailed, Response, _as_response, http_fetch
+from analyzer.crawler.http import FetchFailed, Response, as_response, http_fetch
 
 # Recorded from the live registry on 2026-09-21. The response carries no
 # rate-limit headers of any kind, which is why nothing here honours them.
@@ -142,7 +142,7 @@ def test_an_http_error_from_urllib_becomes_a_response() -> None:
         fp=io.BytesIO(b"slow down"),
     )
 
-    response = _as_response(error)
+    response = as_response(error)
 
     assert response.status == 429
     assert response.headers["retry-after"] == "3"

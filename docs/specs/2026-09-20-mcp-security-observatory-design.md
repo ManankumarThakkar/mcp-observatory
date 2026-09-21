@@ -16,10 +16,16 @@ project-defined servers with the developer's OS privileges and no process
 isolation.
 
 The official registry held 9,652 servers as of May 2026. A crawl on 2026-09-21
-returned 34,215 entries, of which 8,001 expose no source at all and 5,209 name
-a repository another entry had already named, leaving **21,005 distinct
+returned 34,630 entries, of which 8,004 expose no source at all and 5,270 name
+a repository another entry had already named, leaving **21,356 distinct
 repositories** to scan. A random sample of 150 of those found 19% already
 deleted or private.
+
+The registry is also not the ecosystem. A bounded search of GitHub on the same
+day found 13,694 repositories carrying an MCP server toolkit, of which 13,291
+appear in no registry at all. That population is a sample and cannot be
+enumerated, so it is reported separately from the registry census throughout,
+and its members are candidates until their source confirms them.
 
 A registry entry is a registered name, not a server, and the difference is not
 marginal: one account holds 2,332 names pointing at a single repository. No
@@ -242,7 +248,7 @@ passing it.
   that is ~2,000 uncached triage calls of a few hundred tokens apiece - low
   single-digit dollars on Haiku.
 - **The corpus is larger than this estimate assumes.** A crawl on 2026-09-21
-  found 21,005 distinct repositories, against the ~1,000 in the v1 target. At two
+  found 21,356 distinct repositories, against the ~1,000 in the v1 target. At two
   semantic findings each that is ~42,000 triage calls, well past the 3,000-call
   spend guard below. v1 therefore scans a **sample** of the corpus rather than
   all of it, and the sampling method is published alongside the results for the

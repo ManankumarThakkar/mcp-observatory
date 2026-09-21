@@ -2,7 +2,7 @@ import json
 from pathlib import Path
 
 from analyzer.crawler.corpus import build_corpus
-from analyzer.crawler.coverage import Coverage, render_coverage, write_corpus
+from analyzer.crawler.coverage import Coverage, Sample, render_coverage, write_corpus
 from analyzer.crawler.registry import Crawl, ServerRecord
 
 
@@ -125,3 +125,129 @@ def test_large_counts_are_readable() -> None:
     assert "48,000" in rendered
     assert "13,788" in rendered
     assert "34212" not in rendered
+
+
+def _sample(*repo_urls: str) -> Sample:
+    return Sample(
+        repo_urls=tuple(repo_urls),
+        queries=('"@modelcontextprotocol/sdk" filename:package.json',),
+        requests_spent=200,
+    )
+
+
+def test_the_sample_reports_how_much_of_it_the_census_already_had() -> None:
+    """The overlap is the finding, so it is computed rather than asserted.
+
+    A sample that mostly duplicates the registry would mean code search adds
+    little. A sample that barely overlaps means the registry covers a small
+    share of what exists, which is what the measurement showed.
+    """
+    coverage = Coverage(
+        crawled_at="2026-09-21T00:00:00Z",
+        entries_seen=10,
+        skipped_without_source=6,
+        corpus=build_corpus(_crawl().records),
+        sample=_sample(
+            "https://github.com/shared/repo",
+            "https://github.com/brand/new",
+            "https://github.com/another/new",
+        ),
+    )
+
+    assert coverage.sample_size == 3
+    assert coverage.sample_already_in_census == 1
+    assert coverage.sample_beyond_census == 2
+
+
+def test_the_census_comparison_ignores_url_casing() -> None:
+    """Registry URLs carry whatever case the publisher typed.
+
+    A live registry entry reads `https://github.com/DIGIBIZ360-COM/adoraads`,
+    while code search reports the repository's canonical name. Comparing them
+    literally would count the same repository as a new discovery and overstate
+    what the registry is missing, which is precisely the claim being made.
+    """
+    crawl = Crawl(
+        records=(
+            ServerRecord(
+                server_id="one/a",
+                repo_url="https://github.com/Mixed-Case/Repo",
+                discovered_via="registry",
+            ),
+        ),
+        entries_seen=1,
+        skipped_without_source=0,
+    )
+    coverage = Coverage(
+        crawled_at="2026-09-21T00:00:00Z",
+        entries_seen=1,
+        skipped_without_source=0,
+        corpus=build_corpus(crawl.records),
+        sample=_sample("https://github.com/mixed-case/repo"),
+    )
+
+    assert coverage.sample_beyond_census == 0
+
+
+def test_the_sample_never_changes_the_census_arithmetic() -> None:
+    """The whole reason these are two populations and not one list.
+
+    The census is reproducible: the same crawl gives the same number. The
+    sample depends on how long the pass ran. Letting the second move the first
+    would destroy the property that makes the census worth publishing.
+    """
+    without = Coverage(
+        crawled_at="2026-09-21T00:00:00Z",
+        entries_seen=10,
+        skipped_without_source=6,
+        corpus=build_corpus(_crawl().records),
+    )
+    with_sample = Coverage(
+        crawled_at="2026-09-21T00:00:00Z",
+        entries_seen=10,
+        skipped_without_source=6,
+        corpus=build_corpus(_crawl().records),
+        sample=_sample("https://github.com/brand/new"),
+    )
+
+    assert with_sample.corpus == without.corpus
+    assert with_sample.entries_seen == without.entries_seen
+    assert "6 + 2 + 2 = 10, against 10 entries seen" in render_coverage(with_sample)
+
+
+def test_the_summary_marks_the_sample_as_a_sample() -> None:
+    rendered = render_coverage(
+        Coverage(
+            crawled_at="2026-09-21T00:00:00Z",
+            entries_seen=10,
+            skipped_without_source=6,
+            corpus=build_corpus(_crawl().records),
+            sample=_sample("https://github.com/brand/new"),
+        )
+    )
+
+    assert "not a census" in rendered.lower()
+    assert "candidate" in rendered.lower()
+
+
+def test_a_crawl_without_a_sample_has_no_sample_section() -> None:
+    rendered = render_coverage(_coverage())
+
+    assert "sample" not in rendered.lower()
+
+
+def test_the_corpus_keeps_the_sample_separate_from_the_census(tmp_path: Path) -> None:
+    coverage = Coverage(
+        crawled_at="2026-09-21T00:00:00Z",
+        entries_seen=10,
+        skipped_without_source=6,
+        corpus=build_corpus(_crawl().records),
+        sample=_sample("https://github.com/brand/new"),
+    )
+    destination = tmp_path / "corpus.json"
+
+    write_corpus(destination, coverage)
+
+    payload = json.loads(destination.read_text(encoding="utf-8"))
+    assert payload["beyond_the_registry"]["repo_urls"] == ["https://github.com/brand/new"]
+    assert len(payload["repositories"]) == 2

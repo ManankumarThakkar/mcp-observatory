@@ -3,6 +3,7 @@
 import json
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from analyzer.crawler.corpus import Corpus, build_corpus
 from analyzer.crawler.registry import Crawl
@@ -12,6 +13,35 @@ GENERATED_NOTE = (
     "the crawl it describes, so this file and the scanned set can never "
     "disagree. Do not edit by hand."
 )
+
+
+def _canonical(repo_url: str) -> str:
+    """A repository URL reduced to what identifies it.
+
+    Case and a trailing slash or .git suffix are spelling, not identity.
+    """
+    return repo_url.rstrip("/").removesuffix(".git").lower()
+
+
+@dataclass(frozen=True)
+class Sample:
+    """Repositories found beyond the registry, by searching a code host.
+
+    A sample and never a census, and the distinction is load-bearing. The
+    registry can be enumerated completely, so the same crawl gives the same
+    number. Code search serves at most 1,000 results per query and ten
+    requests a minute, so what it returns depends on how long the pass ran.
+    Merging the two would make the published figure depend on our own runtime,
+    which is exactly the property that made publishing it worthwhile.
+
+    These are candidates rather than servers. The queries match consumers of
+    MCP as well as implementations, and nothing at discovery time can separate
+    them.
+    """
+
+    repo_urls: tuple[str, ...]
+    queries: tuple[str, ...]
+    requests_spent: int
 
 
 @dataclass(frozen=True)
@@ -29,6 +59,31 @@ class Coverage:
     entries_seen: int
     skipped_without_source: int
     corpus: Corpus
+    sample: Sample | None = None
+
+    @property
+    def sample_size(self) -> int:
+        return len(self.sample.repo_urls) if self.sample else 0
+
+    @property
+    def sample_already_in_census(self) -> int:
+        """How much of the sample the registry had already.
+
+        Compared case-insensitively. Registry URLs carry whatever case the
+        publisher typed, and a live entry reads
+        `https://github.com/DIGIBIZ360-COM/adoraads` where the code host
+        reports the repository's canonical name. A literal comparison would
+        count that as a new discovery and overstate what the registry misses,
+        which is the exact claim this number supports.
+        """
+        if not self.sample:
+            return 0
+        census = {_canonical(r.repo_url) for r in self.corpus.repositories}
+        return sum(1 for url in self.sample.repo_urls if _canonical(url) in census)
+
+    @property
+    def sample_beyond_census(self) -> int:
+        return self.sample_size - self.sample_already_in_census
 
     @classmethod
     def from_crawl(cls, crawl: Crawl, *, crawled_at: str) -> "Coverage":
@@ -117,7 +172,50 @@ def render_coverage(coverage: Coverage) -> str:
         collapsing,
         "",
     ]
+    if coverage.sample is not None:
+        lines += _sample_section(coverage, coverage.sample)
     return "\n".join(lines)
+
+
+def _sample_section(coverage: Coverage, sample: Sample) -> list[str]:
+    """The second population, kept visibly apart from the first.
+
+    Everything above this heading is a complete enumeration and reproduces
+    exactly. Everything below is what a bounded search found in the time it
+    was given. Presenting them as one number would quietly make the headline
+    depend on our own runtime.
+    """
+    caveat = (
+        "These are **candidates, not a census.** The registry can be read to "
+        "the end, so the figures above reproduce exactly. A code host serves "
+        "at most 1,000 results per query at ten requests a minute, so what "
+        "follows is what one bounded pass found, and a longer pass would find "
+        "more. The search also cannot tell a server from something that merely "
+        "uses one, so these are checked against their source before anything "
+        "is published about them."
+    )
+    finding = (
+        f"**{coverage.sample_beyond_census:,} of {coverage.sample_size:,}** "
+        "repositories found this way appear nowhere in the registry "
+        f"({coverage.sample_beyond_census / max(coverage.sample_size, 1):.0%}). "
+        f"The registry had already listed {coverage.sample_already_in_census:,}. "
+        "The registered ecosystem is not the whole ecosystem, and this is the "
+        "measurement that says by how much."
+    )
+    queries = "\n".join(f"- `{query}`" for query in sample.queries)
+
+    return [
+        "## Beyond the registry",
+        "",
+        caveat,
+        "",
+        finding,
+        "",
+        f"Found with {sample.requests_spent:,} search requests, asking:",
+        "",
+        queries,
+        "",
+    ]
 
 
 def write_corpus(destination: Path, coverage: Coverage) -> None:
@@ -128,10 +226,19 @@ def write_corpus(destination: Path, coverage: Coverage) -> None:
     Anyone who wants to check the summary regenerates this and compares.
     """
     destination.parent.mkdir(parents=True, exist_ok=True)
-    payload = {
+    payload: dict[str, Any] = {
         "crawled_at": coverage.crawled_at,
         "entries_seen": coverage.entries_seen,
         "skipped_without_source": coverage.skipped_without_source,
         **coverage.corpus.to_dict(),
     }
+    if coverage.sample is not None:
+        # A separate key, not extra rows among the repositories. Anything that
+        # reads this file has to be able to tell the complete enumeration from
+        # the bounded sample without knowing how it was produced.
+        payload["beyond_the_registry"] = {
+            "repo_urls": list(coverage.sample.repo_urls),
+            "queries": list(coverage.sample.queries),
+            "requests_spent": coverage.sample.requests_spent,
+        }
     destination.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
