@@ -180,6 +180,11 @@ record with an updated `last_seen` - which is what produces the time series.
   are the rule unit tests and they run on every commit.
 - **Golden set.** A hand-labeled sample of real findings, target 200–300 across
   rules, stored in `evals/golden/`. This is the ground truth for triage accuracy.
+  It is **sampled randomly from actual scan output**, never curated: a corpus
+  assembled to match our own rules would only measure whether those rules match
+  the examples they were written from. The sampling method is published with the
+  numbers, and the corpus ships as an open benchmark with a scoring script
+  others can run (see `DECISIONS.md` D7 and D8).
 - **Regression gate.** CI fails if per-rule precision falls more than 5 points
   below baseline.
 - **Snapshot tests.** SARIF output is snapshot-tested for schema validity.
@@ -244,6 +249,8 @@ The measurement is the differentiator; a fifth rule is not.
 2a. Per-language coverage is stated alongside every aggregate figure. The
     four tree-sitter rules cover Python in v1 (see `DECISIONS.md` D6); a
     Python-derived percentage is never presented as an ecosystem-wide one.
+2b. The golden set is published as an open benchmark, with its sampling method
+    and a scoring script others can run against their own scanners.
 3. The nightly job runs unattended and the time series has more than one point.
 4. `SECURITY.md` is live and the disclosure gate is enforced in code.
 5. A technical writeup explains the architecture, the measured accuracy, and the
