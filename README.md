@@ -65,6 +65,16 @@ and sent privately to the maintainer first, enforced in code rather than promise
 in a policy document. Scanning someone's project and publishing the result
 carries an obligation, and that obligation should be executable.
 
+**What it costs to run.** Most checks never call a model at all: characters
+that cannot appear innocently are caught by code, and a dangerous pattern with
+an obvious path from input to sink is decided without asking anything. Only
+genuinely ambiguous cases are sent to a model, and repeated findings are cached
+by content, so scanning an unchanged server again is free.
+
+Cost per server scanned is published next to the accuracy figure, and for the
+same reason: "it's cheap" is an adjective, and a number you can check is not.
+Expect most servers to cost nothing.
+
 The labeled corpus itself is published as an open benchmark with a scoring
 script, so any scanner can be measured on the same footing rather than each
 quoting a number from its own private collection. A result showing the ecosystem

@@ -211,3 +211,61 @@ run (D7 reasoning, and the argument that replaced the rule registry). It is
 bounded and rare here rather than systemic, but per-file skip reporting belongs
 with the per-server outcome model in the scan orchestrator, and should be added
 when that exists.
+
+---
+
+## D10 - Treat cost the way we treat accuracy: measure it and publish it
+
+**Decision.** Track tokens and money per server scanned, publish the figure
+beside the precision figure, and publish the share of findings that never
+reached a model at all. Design for someone running the scanner on their own
+servers, not only for our nightly run.
+
+**Why.** The same argument as D5. An unmeasured error rate is an opinion; so is
+"it's cheap". A scanner someone else can run costs them real money, and a
+number they can check is worth more than an adjective.
+
+It is also a genuine property of the design rather than a claim bolted on.
+Spec section 7's partial adjudication means a direct taint path never reaches a
+model, `UNICODE-CONCEAL` is never adjudicated at all, and findings are cached by
+content hash so an unchanged finding costs nothing on the next run. Most servers
+should cost nothing to scan.
+
+**What the arithmetic says**, at $1.00 per million input tokens and $5.00 per
+million output on `claude-haiku-4-5`, estimating ~600 input and ~100 output
+tokens per adjudication:
+
+| | Standard | Batch API |
+|---|---|---|
+| One adjudicated finding | $0.0011 | $0.00055 |
+| A typical server, 2 findings | $0.0022 | $0.0011 |
+| A clean server | $0 | $0 |
+
+**Three consequences for the triage layer.**
+
+*Use the Batch API.* It is 50% cheaper and asynchronous, and a nightly run has
+no latency requirement at all. This is the largest lever available and it costs
+nothing but a different call shape: submit, poll, collect. That reshapes the
+triage layer, so it is a design input rather than an optimisation.
+
+*Check whether prompt caching even applies.* The minimum cacheable prefix is
+512 to 4096 tokens depending on model. A triage system prompt may well be
+shorter than that, in which case caching silently does nothing and the cache
+hit rate is zero. Measure `usage.cache_read_input_tokens` rather than assuming.
+
+*Measure tokens, do not estimate them.* `messages.count_tokens` is free and
+exact. The numbers above are arithmetic on real prices applied to estimated
+token counts, and the estimate is the weak half.
+
+**What this changes about sampling.** A full corpus scan of 25,977 servers is
+roughly 52,000 adjudications, about $28 batched, against a stated ceiling of
+$20-30 a month, and only on the first run because the content-hash cache
+absorbs everything unchanged afterwards. The 3,000-call spend guard in spec
+section 12 works out to about $1.65, which is roughly twenty times more
+conservative than the budget it was meant to protect. It was set from intuition
+rather than arithmetic and should be recalibrated once the token counts are
+measured.
+
+**Cost.** Publishing a cost figure invites the same scrutiny as publishing an
+accuracy figure, and a number that moves with model pricing needs a date
+attached. Both are acceptable, and both are the point.
