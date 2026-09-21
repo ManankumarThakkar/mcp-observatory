@@ -144,3 +144,27 @@ def test_the_vulnerable_fixture_is_flagged_and_the_clean_one_is_not() -> None:
 
     assert UnicodeConcealRule().analyze(_ctx(vulnerable))
     assert UnicodeConcealRule().analyze(_ctx(clean)) == []
+
+
+def test_line_numbers_count_newlines_not_unicode_separators() -> None:
+    """A repository must not get to choose the line number in its own finding.
+
+    str.splitlines() breaks on U+2028, U+2029, U+0085 and several C0 controls
+    as well as newline. Git, every editor and every reviewer count newlines.
+    Prefixing a file with invisible separators therefore let the author pick
+    the line number that would be published, so a reviewer opening the file
+    finds nothing there and reads a true finding as a false positive. On a
+    project that publishes a measured precision figure, that is an attack on
+    the number rather than on the code.
+
+    It also shifted finding_id, which includes the line, so the same issue
+    would arrive with a fresh identity and break the time series.
+    """
+    line_separator = "\u2028"
+    source = "# " + line_separator * 5 + "\nimport os\nd = \"safe\u202e\"\n"
+
+    findings = UnicodeConcealRule().analyze(_ctx(source))
+
+    assert len(findings) == 1
+    assert findings[0].location.line == 3, "the override is on the third physical line"
+    assert "at line 3" in findings[0].evidence

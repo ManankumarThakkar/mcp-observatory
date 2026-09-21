@@ -20,15 +20,24 @@ MAX_BYTES = 50 * 1024 * 1024
 MAX_FILES = 5_000
 
 
-class UnsupportedRepositoryURL(Exception):
+class FetchError(Exception):
+    """Base for fetch failures that are expected outcomes rather than bugs.
+
+    A caller can distinguish these from a genuine defect: the CLI reports them
+    as ordinary errors instead of a traceback, and the orchestrator records
+    them against the server and carries on with the rest of the run.
+    """
+
+
+class UnsupportedRepositoryURL(FetchError):
     """Raised for a repository URL we are not willing to hand to git."""
 
 
-class CloneTooLarge(Exception):
+class CloneTooLarge(FetchError):
     """Raised when a cloned repository exceeds the configured resource caps."""
 
 
-class DestinationNotEmpty(Exception):
+class DestinationNotEmpty(FetchError):
     """Raised when the target directory already holds something."""
 
 
