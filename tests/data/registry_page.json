@@ -1,0 +1,121 @@
+{
+  "servers": [
+    {
+      "server": {
+        "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+        "name": "ac.tandem/docs-mcp",
+        "description": "Remote MCP server for Tandem docs, install guides, SDKs, workflows, and agent setup help.",
+        "repository": {
+          "url": "https://github.com/frumu-ai/tandem",
+          "source": "github"
+        },
+        "version": "0.3.2",
+        "websiteUrl": "https://tandem.ac/docs-mcp",
+        "remotes": [
+          {
+            "type": "streamable-http",
+            "url": "https://tandem.ac/mcp"
+          }
+        ]
+      },
+      "_meta": {
+        "io.modelcontextprotocol.registry/official": {
+          "status": "active",
+          "statusChangedAt": "2026-04-22T21:06:34.500049Z",
+          "publishedAt": "2026-04-22T21:06:34.500049Z",
+          "updatedAt": "2026-04-22T21:06:34.500049Z",
+          "isLatest": true
+        }
+      }
+    },
+    {
+      "server": {
+        "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+        "name": "agency.goji/goji",
+        "description": "Answers on AEO, SEO, web and brand from GOJI's published material. Melbourne, Australia.",
+        "repository": {
+          "url": "https://github.com/goji-agency/goji-mcp",
+          "source": "github"
+        },
+        "version": "1.0.1",
+        "websiteUrl": "https://goji.agency",
+        "remotes": [
+          {
+            "type": "streamable-http",
+            "url": "https://mcp.goji.agency/mcp"
+          }
+        ]
+      },
+      "_meta": {
+        "io.modelcontextprotocol.registry/official": {
+          "status": "active",
+          "statusChangedAt": "2026-08-13T13:12:26.047978Z",
+          "publishedAt": "2026-08-13T13:12:26.047978Z",
+          "updatedAt": "2026-08-13T13:12:26.047978Z",
+          "isLatest": true
+        }
+      }
+    },
+    {
+      "server": {
+        "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+        "name": "ai.feedback1/mcp",
+        "description": "Collect feedback and manage the product roadmap from AI agents.",
+        "title": "Feedback1",
+        "repository": {
+          "url": "https://gitlab.com/tonyzorin/feedback1",
+          "source": "gitlab"
+        },
+        "version": "1.1.0",
+        "websiteUrl": "https://feedback1.ai",
+        "remotes": [
+          {
+            "type": "streamable-http",
+            "url": "https://app.feedback1.ai/api/mcp"
+          },
+          {
+            "type": "sse",
+            "url": "https://app.feedback1.ai/api/mcp/sse"
+          }
+        ]
+      },
+      "_meta": {
+        "io.modelcontextprotocol.registry/official": {
+          "status": "active",
+          "statusChangedAt": "2026-08-31T10:09:43.701884Z",
+          "publishedAt": "2026-08-31T10:09:43.701884Z",
+          "updatedAt": "2026-08-31T10:09:43.701884Z",
+          "isLatest": true
+        }
+      }
+    },
+    {
+      "server": {
+        "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+        "name": "ac.inference.sh/mcp",
+        "description": "run any ai model. compose agents, stack knowledge, connect tools. one api, pay per run.",
+        "title": "inference.sh",
+        "version": "2.0.1",
+        "remotes": [
+          {
+            "type": "streamable-http",
+            "url": "https://api.inference.sh/mcp"
+          }
+        ]
+      },
+      "_meta": {
+        "io.modelcontextprotocol.registry/official": {
+          "status": "active",
+          "statusChangedAt": "2026-07-27T10:44:51.359634Z",
+          "publishedAt": "2026-07-27T10:44:51.359634Z",
+          "updatedAt": "2026-07-27T10:44:51.359634Z",
+          "isLatest": true
+        }
+      }
+    }
+  ],
+  "metadata": {
+    "nextCursor": "io.example/next:1.0.0",
+    "count": 4
+  }
+}
