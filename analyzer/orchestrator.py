@@ -13,9 +13,11 @@ from analyzer.crawler.registry import ServerRecord
 from analyzer.fetcher.clone import CloneResult, CloneTooLarge
 from analyzer.models import Finding
 from analyzer.scanner import ScanReport, SkippedFile
+from analyzer.validation import ServerEvidence, looks_like_server
 
 CloneFn = Callable[[str, Path], CloneResult]
 ScanFn = Callable[[Path, str, str], ScanReport]
+ValidateFn = Callable[[Path], ServerEvidence]
 
 Status = Literal["scanned", "unreachable", "too-large", "failed"]
 
@@ -42,6 +44,15 @@ UNREACHABLE_ERRORS = (
 # p90 for a single repository from 2.0s to 3.2s.
 DEFAULT_WORKERS = 8
 
+# The only discovery source that carries a publisher's assertion that the
+# repository is a server. Everything else has to prove it.
+#
+# Written as the exempt set rather than the validated set so a discovery path
+# added later is validated by default. A new crawler that nobody remembers to
+# add to a list would otherwise publish unvalidated repositories silently,
+# which is the failure this whole check exists to prevent.
+CLAIMED_SOURCES = frozenset({"registry"})
+
 
 @dataclass(frozen=True)
 class ScanOutcome:
@@ -58,6 +69,15 @@ class ScanOutcome:
     commit_sha: str = ""
     error: str = ""
 
+    # Whether this may appear in the published index, which is a separate
+    # question from whether the scan worked. A repository we could not prove
+    # is a server is still scanned, and its findings are still kept, but it is
+    # withheld. Defaults to False so that no path which fails before the check
+    # runs, an unreachable clone above all, can leak into a published index by
+    # omission.
+    admitted: bool = False
+    admission_note: str = ""
+
 
 def scan_server(
     record: ServerRecord,
@@ -65,6 +85,7 @@ def scan_server(
     clone: CloneFn,
     scan: ScanFn,
     workdir: Path,
+    validate: ValidateFn = looks_like_server,
 ) -> ScanOutcome:
     """Clone and scan one server. Never raises.
 
@@ -83,12 +104,15 @@ def scan_server(
     try:
         result = clone(record.repo_url, dest / "repo")
         report = scan(result.path, record.server_id, result.commit_sha)
+        admitted, note = _admission(record, result.path, validate)
         return ScanOutcome(
             server_id=record.server_id,
             status="scanned",
             findings=tuple(report.findings),
             skipped=tuple(report.skipped),
             commit_sha=result.commit_sha,
+            admitted=admitted,
+            admission_note=note,
         )
     except CloneTooLarge as exc:
         return ScanOutcome(record.server_id, "too-large", error=str(exc))
@@ -102,6 +126,26 @@ def scan_server(
         return ScanOutcome(record.server_id, "failed", error=_describe(exc))
     finally:
         shutil.rmtree(dest, ignore_errors=True)
+
+
+def _admission(
+    record: ServerRecord, root: Path, validate: ValidateFn
+) -> tuple[bool, str]:
+    """Decide whether this repository may appear in the published index.
+
+    Scanning and publishing are separated deliberately. A candidate that
+    cannot prove itself is still scanned, because the clone has already
+    happened and the scan is nearly free, and its findings are kept. Widening
+    the rule later, or discovering it was wrong, then costs a re-evaluation
+    rather than a fresh multi-hour run over thousands of repositories.
+    """
+    if record.discovered_via in CLAIMED_SOURCES:
+        return True, ""
+
+    evidence = validate(root)
+    if evidence.is_server:
+        return True, f"{evidence.marker} in {evidence.path}"
+    return False, "no server SDK import found"
 
 
 def _describe(exc: BaseException) -> str:
@@ -121,6 +165,7 @@ def scan_all(
     scan: ScanFn,
     workdir: Path,
     workers: int = DEFAULT_WORKERS,
+    validate: ValidateFn = looks_like_server,
 ) -> list[ScanOutcome]:
     """Scan every record concurrently, in input order.
 
@@ -135,7 +180,9 @@ def scan_all(
     """
 
     def run(record: ServerRecord) -> ScanOutcome:
-        return scan_server(record, clone=clone, scan=scan, workdir=workdir)
+        return scan_server(
+            record, clone=clone, scan=scan, workdir=workdir, validate=validate
+        )
 
     with ThreadPoolExecutor(max_workers=workers) as pool:
         # map preserves input order regardless of completion order.
