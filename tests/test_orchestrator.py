@@ -1,4 +1,5 @@
 import subprocess
+import threading
 import time
 from pathlib import Path
 
@@ -7,6 +8,7 @@ from analyzer.fetcher.clone import CloneResult, CloneTooLarge
 from analyzer.models import Finding, Location
 from analyzer.orchestrator import ScanOutcome, scan_all, scan_server
 from analyzer.scanner import ScanReport, SkippedFile
+from analyzer.validation import ServerEvidence
 
 
 def _record(server_id: str = "acme/thing") -> ServerRecord:
@@ -169,19 +171,32 @@ def test_work_actually_runs_in_parallel(tmp_path: Path) -> None:
     the registry alone, against a six-hour job limit, and that is before the
     13,694 code-search candidates. A pool that silently ran serially would
     still pass every other test here.
+
+    Counts how many clones are genuinely in flight at once rather than timing
+    the run. An earlier version asserted the wall clock stayed under 0.4s,
+    which measured a proxy for concurrency instead of concurrency, and failed
+    on a loaded machine while the code was perfectly correct. A test that
+    fails for reasons unrelated to its subject gets ignored, then deleted.
     """
+    lock = threading.Lock()
+    in_flight = 0
+    peak = 0
 
     def clone(url: str, dest: Path) -> CloneResult:
-        time.sleep(0.1)
+        nonlocal in_flight, peak
+        with lock:
+            in_flight += 1
+            peak = max(peak, in_flight)
+        time.sleep(0.05)
+        with lock:
+            in_flight -= 1
         return _clone_ok(url, dest)
 
     records = [_record(f"acme/{n}") for n in range(8)]
 
-    started = time.monotonic()
     scan_all(records, clone=clone, scan=_scan_ok, workdir=tmp_path, workers=8)
-    elapsed = time.monotonic() - started
 
-    assert elapsed < 0.4, f"8 x 0.1s took {elapsed:.2f}s, so it ran serially"
+    assert peak >= 4, f"only {peak} clone(s) ever ran at once, so the pool is not parallel"
 
 
 def test_scan_all_survives_a_record_whose_clone_hangs_forever(tmp_path: Path) -> None:
@@ -224,3 +239,116 @@ def test_every_outcome_carries_every_field(tmp_path: Path) -> None:
         commit_sha="",
         error="RuntimeError: nope",
     )
+
+
+def _not_a_server(root: Path) -> ServerEvidence:
+    return ServerEvidence(is_server=False)
+
+
+def _a_server(root: Path) -> ServerEvidence:
+    return ServerEvidence(is_server=True, marker="from mcp.server", path="server.py")
+
+
+def test_a_registry_entry_is_never_validated(tmp_path: Path) -> None:
+    """The registry carries its publisher's claim, and holds other languages.
+
+    It lists servers written in Rust, C# and Go, which the marker check does
+    not recognise at all, so applying it there would reject working servers
+    for being written in the wrong language.
+    """
+    called = []
+
+    def validate(root: Path) -> ServerEvidence:
+        called.append(root)
+        return _not_a_server(root)
+
+    outcome = scan_server(
+        _record(), clone=_clone_ok, scan=_scan_ok, workdir=tmp_path, validate=validate
+    )
+
+    assert called == []
+    assert outcome.admitted
+
+
+def test_a_candidate_that_proves_itself_is_admitted(tmp_path: Path) -> None:
+    record = ServerRecord(
+        server_id="acme/thing",
+        repo_url="https://github.com/acme/thing",
+        discovered_via="code-search",
+    )
+
+    outcome = scan_server(
+        record, clone=_clone_ok, scan=_scan_ok, workdir=tmp_path, validate=_a_server
+    )
+
+    assert outcome.admitted
+    assert outcome.admission_note == "from mcp.server in server.py"
+
+
+def test_a_candidate_that_cannot_prove_itself_is_scanned_but_withheld(
+    tmp_path: Path,
+) -> None:
+    """The clone already happened, so scanning it costs almost nothing.
+
+    Keeping the findings means that widening the rule later, or discovering it
+    was wrong, costs a re-evaluation rather than a fresh multi-hour run over
+    thousands of repositories.
+    """
+    record = ServerRecord(
+        server_id="acme/client",
+        repo_url="https://github.com/acme/client",
+        discovered_via="code-search",
+    )
+
+    outcome = scan_server(
+        record, clone=_clone_ok, scan=_scan_ok, workdir=tmp_path, validate=_not_a_server
+    )
+
+    assert outcome.status == "scanned"
+    assert outcome.findings != ()
+    assert not outcome.admitted
+    assert outcome.admission_note == "no server SDK import found"
+
+
+def test_an_unclaimed_source_added_later_is_validated_by_default(tmp_path: Path) -> None:
+    """Failing safe matters more here than naming every future source.
+
+    A new discovery path that nobody remembers to add to a list would
+    otherwise publish unvalidated repositories silently. Only a source that
+    carries a publisher's claim is exempt, and there is exactly one.
+    """
+    record = ServerRecord(
+        server_id="acme/thing",
+        repo_url="https://github.com/acme/thing",
+        discovered_via="some-future-crawler",
+    )
+
+    outcome = scan_server(
+        record, clone=_clone_ok, scan=_scan_ok, workdir=tmp_path, validate=_not_a_server
+    )
+
+    assert not outcome.admitted
+
+
+def test_a_failed_scan_is_not_reported_as_admitted(tmp_path: Path) -> None:
+    """Admission is a claim about a repository we actually read.
+
+    A clone that never arrived has proved nothing, and defaulting it to
+    admitted would let unreachable candidates into a published index.
+    """
+
+    def clone(url: str, dest: Path) -> CloneResult:
+        raise subprocess.CalledProcessError(128, ["git", "clone"], stderr="gone")
+
+    record = ServerRecord(
+        server_id="acme/gone",
+        repo_url="https://github.com/acme/gone",
+        discovered_via="code-search",
+    )
+
+    outcome = scan_server(
+        record, clone=clone, scan=_scan_ok, workdir=tmp_path, validate=_a_server
+    )
+
+    assert outcome.status == "unreachable"
+    assert not outcome.admitted
