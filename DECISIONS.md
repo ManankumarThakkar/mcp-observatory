@@ -342,3 +342,61 @@ being high while recall is visibly poor points the same way.
 
 **Revisit when.** Plan 3 produces the first measured precision and recall per
 rule.
+
+---
+
+## D12 - The triage layer needs a typed, calibrated verdict, not free text
+
+**Decision.** Findings a rule could not decide are adjudicated by a model that
+returns a **calibrated probability**, and the threshold applied to that
+probability is published alongside the results. A System One decision model,
+Jev, is the leading candidate. It is **not yet chosen**: Plan 3's golden set
+scores it against a frontier model and against the rules alone, and that
+measurement decides.
+
+**Why a calibrated probability rather than a verdict.** D7 stakes this project
+on publishing a measured accuracy figure rather than asserting one. A number
+that means what it says can be thresholded, tuned, and reported as precision
+and recall *at that threshold*, so a reader can see the trade we chose and
+disagree with it. A free-text verdict carries no confidence a reader can
+inspect, and anything downstream ends up parsing prose to recover a judgement
+the model never actually expressed.
+
+**Why the volume makes this a real choice rather than a detail.** Two of five
+rules already produce roughly 6,400 low-confidence findings across the corpus,
+measured by extrapolating a 150-server sample. Spec section 12 budgets a
+3,000-call guard. Three rules remain unbuilt. Whatever adjudicates has to be
+cheap and fast enough to run nightly over an ecosystem, which is a different
+requirement from answering one question well.
+
+**Why this is recorded as a candidate rather than a choice.** Committing to an
+adjudicator before measuring it would be the precise failure D7 exists to
+prevent. The comparison is cheap, the golden set is being built regardless
+under D8, and the result is publishable whichever way it falls.
+
+**What gets measured.** The same hand-labelled findings scored three ways:
+rules alone, the candidate decision model at a published threshold, and a
+frontier model. Reported per rule as precision, recall, and cost per decision.
+
+**Where a judgment model is explicitly barred, whatever the measurement says.**
+
+- **Anything `docs/coverage.md` reports.** Those counts reproduce exactly and
+  their arithmetic closes by construction. A remote call in that path makes the
+  published corpus depend on a service and a model version, destroying the
+  reproducibility that makes it worth publishing at all.
+- **The non-runtime path exclusion and the import-binding analysis.** Both are
+  deterministic and both are published as rules a reader can check for
+  themselves.
+- **Releasing a finding.** The disclosure gate may use a probability to
+  *escalate* a finding to human review. It may never use one to publish a
+  finding before the maintainer has been notified. See `SECURITY.md`.
+
+**A second use, if the measurement supports the first.** D11 records two recall
+gaps accepted deliberately: a handler passed by name, and a helper called from
+a handler. Both were deferred because closing them means interprocedural
+dataflow analysis. A calibrated "is this reachable from tool input?" is a much
+cheaper route to the same recall, and is worth trying before that analysis is
+written.
+
+**Revisit when.** Plan 3 produces the first measured precision and recall per
+rule, which is the same trigger as D11.
