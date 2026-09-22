@@ -7,6 +7,7 @@ from tree_sitter import Node, Query, QueryCursor
 from analyzer.models import Confidence, Finding, Location
 from analyzer.parsing.trees import ParsedFile, language_for
 from analyzer.rules.base import FileContext
+from analyzer.rules.imports import bindings_for
 from analyzer.rules.taint import classify_taint, enclosing_parameters
 
 # Node's two shells-by-default. Unlike Python, where the danger is opting in
@@ -49,91 +50,6 @@ CONFIDENCE_BY_TAINT: dict[str, Confidence] = {
 }
 
 MAX_EVIDENCE_CHARS = 160
-
-
-def _child_process_bindings(parsed: ParsedFile) -> tuple[set[str], set[str]]:
-    """Names this file bound from child_process: direct functions, and namespaces.
-
-    Necessary rather than fastidious. `exec` is an ordinary method name, and a
-    file may import child_process for one purpose while calling `.exec` on a
-    database handle for another, which the clean fixture does. Matching the
-    name alone reports that as shell injection, and a precision figure this
-    project publishes cannot afford it.
-
-    Both module syntaxes are read, because over half the JavaScript in the
-    corpus is commonjs rather than ES modules.
-    """
-    direct: set[str] = set()
-    namespaces: set[str] = set()
-
-    def module_of(node: Node) -> str:
-        return parsed.text(node).strip("\"'")
-
-    stack = [parsed.tree.root_node]
-    while stack:
-        node = stack.pop()
-        stack.extend(node.named_children)
-
-        if node.type == "import_statement":
-            source = node.child_by_field_name("source")
-            if source is None or module_of(source) not in MODULE_NAMES:
-                continue
-            # Walked rather than stepped through by hand: a specifier sits two
-            # levels below the statement, under import_clause and then
-            # named_imports, and a fixed-depth loop silently found none of
-            # them while still finding the other import forms.
-            clauses = [
-                child for child in node.named_children if child.type == "import_clause"
-            ]
-            for clause in clauses:
-                inner = list(clause.named_children)
-                while inner:
-                    part = inner.pop()
-                    if part.type == "import_specifier":
-                        # An alias renames the binding, so `exec as run` binds
-                        # `run` and matching `exec` would miss every call.
-                        chosen = part.child_by_field_name("alias") or part.child_by_field_name(
-                            "name"
-                        )
-                        if chosen is not None:
-                            direct.add(parsed.text(chosen))
-                    elif part.type == "identifier":
-                        # A default import names the module object itself.
-                        namespaces.add(parsed.text(part))
-                    else:
-                        # named_imports and namespace_import both nest.
-                        inner.extend(part.named_children)
-
-        elif node.type == "variable_declarator":
-            value = node.child_by_field_name("value")
-            name = node.child_by_field_name("name")
-            if value is None or name is None or value.type != "call_expression":
-                continue
-            callee = value.child_by_field_name("function")
-            arguments = value.child_by_field_name("arguments")
-            if callee is None or arguments is None or parsed.text(callee) != "require":
-                continue
-            if not any(module_of(a) in MODULE_NAMES for a in arguments.named_children):
-                continue
-            if name.type == "identifier":
-                namespaces.add(parsed.text(name))
-            else:
-                direct.update(_names_bound_by(parsed, name))
-
-    return direct, namespaces
-
-
-def _names_bound_by(parsed: ParsedFile, pattern: Node) -> set[str]:
-    """Every name a destructuring pattern introduces, for the require form."""
-    names: set[str] = set()
-    stack = [pattern]
-    while stack:
-        current = stack.pop()
-        if current.type in ("identifier", "shorthand_property_identifier_pattern"):
-            names.add(parsed.text(current))
-            continue
-        stack.extend(current.named_children)
-    return names
 
 
 def _options_requests_a_shell(call: Node) -> bool:
@@ -210,8 +126,8 @@ class ShellExecUnsafeRule:
         if grammar is None:
             return []
 
-        direct_bindings, namespaces = _child_process_bindings(parsed)
-        if not direct_bindings and not namespaces:
+        bindings = bindings_for(parsed, MODULE_NAMES)
+        if not bindings:
             # The module is mentioned but nothing is bound from it, so no call
             # in this file can reach it.
             return []
@@ -233,9 +149,9 @@ class ShellExecUnsafeRule:
             objects = capture.get("object", [])
             if objects:
                 # `cp.exec(...)` counts only when `cp` is the module itself.
-                if parsed.text(objects[0]) not in namespaces:
+                if parsed.text(objects[0]) not in bindings.namespaces:
                     continue
-            elif name not in direct_bindings:
+            elif name not in bindings.direct:
                 # A bare `exec(...)` counts only when the file imported it.
                 continue
 
