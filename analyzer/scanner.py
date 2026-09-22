@@ -1,10 +1,40 @@
 """Walk a cloned repository and apply every rule to every scannable file."""
 
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
 from analyzer.models import Finding
 from analyzer.rules import ALL_RULES
 from analyzer.rules.base import FileContext
+
+# Why a file carrying a scannable extension was not read. Deliberately does not
+# cover files excluded by design, such as images or vendored dependencies: a
+# skip is work we wanted to do and could not, not work we never wanted. Listing
+# every asset would produce thousands of entries per server and bury the few
+# that mean something.
+SkipReason = Literal["symlink", "too-large", "undecodable", "unreadable"]
+
+
+@dataclass(frozen=True)
+class SkippedFile:
+    path: str
+    reason: SkipReason
+
+
+@dataclass(frozen=True)
+class ScanReport:
+    """What a scan found, and what it could not look at.
+
+    The second half exists because an invisible skip is the same shape of
+    problem as a rule that silently does not run. The published index says a
+    server was scanned; if a quarter of its source could not be read, then
+    "scanned" is a claim about work that did not happen, and without this
+    nothing in the output would say so.
+    """
+
+    findings: tuple[Finding, ...]
+    skipped: tuple[SkippedFile, ...]
 
 SCANNABLE_SUFFIXES = frozenset({".py", ".ts", ".js", ".tsx", ".jsx", ".json", ".md"})
 
@@ -51,9 +81,10 @@ def safe_relative_path(relative: Path) -> str:
     return relative.as_posix().encode("utf-8", "surrogateescape").decode("utf-8", "replace")
 
 
-def scan_directory(root: Path, server_id: str, commit_sha: str) -> list[Finding]:
+def scan_directory(root: Path, server_id: str, commit_sha: str) -> ScanReport:
     """Apply every rule in ALL_RULES to every scannable file under root."""
     findings: list[Finding] = []
+    skipped: list[SkippedFile] = []
 
     for path in sorted(root.rglob("*")):
         relative = path.relative_to(root)
@@ -71,6 +102,8 @@ def scan_directory(root: Path, server_id: str, commit_sha: str) -> list[Finding]
         # not to recurse into them, but that is behaviour rather than a
         # guarantee, and 3.13 made it configurable.
         if path.is_symlink():
+            if relative.suffix.lower() in SCANNABLE_SUFFIXES:
+                skipped.append(SkippedFile(safe_relative_path(relative), "symlink"))
             continue
 
         if not path.is_file() or path.suffix.lower() not in SCANNABLE_SUFFIXES:
@@ -84,7 +117,13 @@ def scan_directory(root: Path, server_id: str, commit_sha: str) -> list[Finding]
         # Checked before reading, so an oversized file costs a stat rather than
         # the memory to hold it. Safe to stat here because symlinks were
         # already excluded above.
-        if path.stat().st_size > MAX_FILE_BYTES:
+        try:
+            oversized = path.stat().st_size > MAX_FILE_BYTES
+        except OSError:
+            skipped.append(SkippedFile(safe_relative_path(relative), "unreadable"))
+            continue
+        if oversized:
+            skipped.append(SkippedFile(safe_relative_path(relative), "too-large"))
             continue
 
         try:
@@ -93,12 +132,19 @@ def scan_directory(root: Path, server_id: str, commit_sha: str) -> list[Finding]
             # UNICODE-CONCEAL would score it critical. Every BOM-prefixed file
             # in the corpus would otherwise be a false positive.
             source = path.read_text(encoding="utf-8-sig")
-        except (UnicodeDecodeError, OSError):
-            # One file we cannot decode or open is not a reason to abandon the
+        except UnicodeDecodeError:
+            # One file we cannot decode is not a reason to abandon the
             # repository. Undecodable files carrying source extensions are
             # ordinary in the wild rather than suspicious, and on a nightly run
-            # a single one must not cost us every finding in that server.
+            # a single one must not cost us every finding in that server. It is
+            # recorded rather than dropped, because coverage is a published
+            # claim.
+            skipped.append(SkippedFile(safe_relative_path(relative), "undecodable"))
             continue
+        except OSError:
+            skipped.append(SkippedFile(safe_relative_path(relative), "unreadable"))
+            continue
+
         ctx = FileContext(
             server_id=server_id,
             commit_sha=commit_sha,
@@ -108,4 +154,9 @@ def scan_directory(root: Path, server_id: str, commit_sha: str) -> list[Finding]
         for rule in ALL_RULES:
             findings.extend(rule.analyze(ctx))
 
-    return findings
+    # Sorted rather than walk-ordered, so two scans of one repository produce
+    # the same document and a diff always means the repository changed.
+    return ScanReport(
+        findings=tuple(findings),
+        skipped=tuple(sorted(skipped, key=lambda s: (s.path, s.reason))),
+    )
