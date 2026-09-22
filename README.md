@@ -83,7 +83,7 @@ Five rules look for the specific ways these plugins go wrong: characters hidden
 from human eyes, instructions smuggled into tool descriptions, unchecked file
 paths, unsafe shell commands, and permissions far wider than the plugin needs.
 
-Two are built. Anything a plugin ships that its users never run - its tests,
+Three are built. Anything a plugin ships that its users never run - its tests,
 its build scripts, its examples - is not scanned, because a flaw there is not a
 flaw an assistant can reach. That single rule removed nearly half the findings
 on a trial run over 150 servers.
