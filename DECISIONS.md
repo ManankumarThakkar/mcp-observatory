@@ -36,10 +36,26 @@ backup burden for data that is append-mostly and small).
 **Decision.** One analyzer, written in Python, parsing both Python and
 TypeScript servers through tree-sitter.
 
-**Why.** The ecosystem is roughly 45% Python and 30-35% TypeScript, so
-covering one language would halve the credibility of any ecosystem claim.
-tree-sitter parses both through a single interface. Python also keeps the
-LLM triage and eval layers in the ecosystem with the best tooling.
+**Why.** Covering one language would halve the credibility of any ecosystem
+claim. tree-sitter parses both through a single interface. Python also keeps
+the LLM triage and eval layers in the ecosystem with the best tooling.
+
+**Amended 2026-09-22.** This was argued from "roughly 45% Python and 30-35%
+TypeScript", which predates having a corpus. Measured over 463 real
+repositories across both populations, the split is the other way round:
+
+| | registry | code-search candidates |
+| --- | ---: | ---: |
+| TypeScript | 33% | 39% |
+| Python | 26% | 38% |
+| JavaScript | 16% | 11% |
+| everything else | 24% | 12% |
+
+The conclusion is unchanged and better supported: one analyzer covering both.
+The ordering it implied is not, and D6 is amended accordingly. Covering
+JavaScript needs no extra grammar, because the tsx grammar reads the whole
+JavaScript family including JSX inside a `.js` file, which the plain TypeScript
+grammar rejects.
 
 **Cost.** tree-sitter is lower-level than the TypeScript compiler API, so
 TypeScript-specific semantics take more work. Accepted.
@@ -75,33 +91,47 @@ rules. See D7.
 
 ---
 
-## D6 - v1 deep rules cover Python only, and the dashboard says so
+## D6 - v1 deep rules cover TypeScript and JavaScript, and the dashboard says so
 
-**Decision.** `UNICODE-CONCEAL` runs against every server in the corpus, because
-it is a character scan that needs no parser. The four tree-sitter rules -
-`TOOL-DESC-INJECTION`, `PATH-TRAVERSAL`, `SHELL-EXEC-UNSAFE`, `SCOPE-OVERBROAD`
-- cover Python servers only in v1. The published results state per-language
-coverage explicitly rather than presenting a Python figure as an ecosystem one.
+**Decision.** `UNICODE-CONCEAL` runs against every server in the corpus,
+because it is a character scan that needs no parser. The four tree-sitter rules
+- `TOOL-DESC-INJECTION`, `PATH-TRAVERSAL`, `SHELL-EXEC-UNSAFE`,
+`SCOPE-OVERBROAD` - cover TypeScript and JavaScript servers in v1. Python is
+the first post-v1 work. The published results state per-language coverage
+explicitly rather than presenting one language's figure as an ecosystem one.
 
-**Why.** D3 chose tree-sitter precisely so both languages could be covered, and
-that remains the destination. But TypeScript rules are not a translation of the
-Python ones: the taint analysis differs, each rule needs a second query and its
-own fixtures, and the work would delay every other part of the project
-- including the accuracy measurement, which is the thing that actually
-distinguishes this work.
+**Why.** This decision originally read "Python only", on the basis that Python
+was the larger half of the ecosystem. A measurement of 463 real repositories
+showed it is not: TypeScript and JavaScript together are 50% of both the
+registry and the code-search populations, against Python's 26% and 38%. See the
+table in D3.
+
+Writing one language's rules first is still right, for the reasons the original
+decision gave: the rules are not translations of each other, the taint analysis
+differs, each needs its own queries and fixtures, and doing both would delay the
+accuracy measurement, which is the thing that actually distinguishes this work.
+What changed is only which language goes first, and the answer should follow the
+corpus rather than an assumption about it.
+
+The JavaScript half comes almost free. One grammar covers `.ts`, `.tsx`, `.js`,
+`.jsx`, `.mjs` and `.cjs`, so the rules reach half the ecosystem for roughly one
+language's effort, where Python-first would have reached a quarter to a third.
 
 Shipping a measured, honest half beats delaying a complete one. The failure mode
 to avoid is not narrow coverage; it is *undisclosed* narrow coverage. A reader
-who is told "450 of 1,000 servers were deep-scanned, all 1,000 were checked for
-concealment" can judge the result. A reader shown a bare ecosystem percentage
+who is told which servers were deep-scanned and which were only checked for
+concealment can judge the result. A reader shown a bare ecosystem percentage
 cannot.
 
-**Cost.** The v1 ecosystem claim is narrower than D3 envisaged, and the
-TypeScript share of the corpus gets concealment detection only. Accepted, and
-stated wherever results are published.
+**Cost.** Python servers get concealment detection only in v1, which is a
+quarter of the registry and over a third of the candidates. The Python
+vulnerable and clean fixtures written for Plan 1 remain useful but are no longer
+the ones v1 ships against, so TypeScript fixtures have to be written. Accepted,
+and stated wherever results are published.
 
-**Revisit when.** TypeScript rules are the first post-v1 work, ahead of any
-sixth rule.
+**Revisit when.** Python rules are the first post-v1 work, ahead of any sixth
+rule. If a later measurement moves the split materially, this ordering is the
+thing to re-check, not the choice to do one language at a time.
 
 ---
 

@@ -219,10 +219,19 @@ ruff check .     # lint
 
 ## Coverage in v1
 
-`UNICODE-CONCEAL` runs against every server, because it needs no parser. The
-four deeper rules cover Python servers in v1. Results always state which, and a
-figure derived from Python servers is never presented as an ecosystem-wide one.
-TypeScript support is the first work after v1. See `DECISIONS.md` D6.
+One rule runs against every server, because it reads characters and needs no
+parser at all. The four deeper rules read code, and in v1 they cover TypeScript
+and JavaScript.
+
+That is where the ecosystem actually is. Measured over 463 repositories:
+TypeScript and JavaScript together are 50% of both the registry and the
+unregistered population, against Python's 26% and 38%. One grammar covers the
+whole JavaScript family, so half the ecosystem costs roughly one language's
+work.
+
+Python servers get the concealment check in v1 and the deeper rules first after
+it. Results always state which servers got which, and a figure derived from one
+language is never presented as an ecosystem-wide one. See `DECISIONS.md` D6.
 
 ## Principles
 

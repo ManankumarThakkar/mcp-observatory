@@ -2,7 +2,20 @@
 name = "mcp-observatory"
 version = "0.1.0"
 requires-python = ">=3.11"
-dependencies = []
+# The first runtime dependencies, and the discussion CLAUDE.md requires was
+# settled in DECISIONS.md D3. Three packages, and a fourth needs its own
+# conversation: JavaScript needs no grammar of its own, because the tsx
+# grammar reads the whole JavaScript family including JSX in a .js file.
+#
+# tree-sitter is floored at 0.25, which is where query execution moved out of
+# Query and into QueryCursor. Most examples in circulation still call
+# query.captures(node) and raise AttributeError; the floor stops the old shape
+# being resolved by accident.
+dependencies = [
+    "tree-sitter>=0.25",
+    "tree-sitter-python>=0.23",
+    "tree-sitter-typescript>=0.23",
+]
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0", "ruff>=0.6", "mypy>=1.11"]

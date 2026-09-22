@@ -5,7 +5,21 @@ import pytest
 
 from analyzer.cli import main
 from analyzer.models import Finding, Location
+from analyzer.rules.base import FileContext
 from analyzer.scanner import MAX_FILE_BYTES, SkippedFile, scan_directory
+
+
+class _recorder:
+    """A rule that records the contexts it was handed and finds nothing."""
+
+    rule_id = "TEST-RECORDER"
+
+    def __init__(self, seen: list[FileContext]) -> None:
+        self._seen = seen
+
+    def analyze(self, ctx: FileContext) -> list[Finding]:
+        self._seen.append(ctx)
+        return []
 
 TAG_CHAR = "\U000e0041"  # TAG LATIN CAPITAL LETTER A, invisible to a reader
 
@@ -364,3 +378,75 @@ def test_skips_are_ordered_so_two_scans_of_one_repository_match(tmp_path: Path) 
     report = scan_directory(tmp_path, server_id="owner/repo", commit_sha="a" * 40)
 
     assert [s.path for s in report.skipped] == ["a.py", "b.py", "c.py"]
+
+
+def test_a_python_file_reaches_a_rule_already_parsed(tmp_path: Path) -> None:
+    """Parsing happens once per file, not once per rule.
+
+    Four rules will want the same tree. Parsing in the walk and handing the
+    result down keeps the cost at one parse per file rather than one per rule.
+    """
+    (tmp_path / "server.py").write_text("def handler():\n    pass\n", encoding="utf-8")
+    seen: list[FileContext] = []
+
+    scan_directory(
+        tmp_path,
+        server_id="owner/repo",
+        commit_sha="a" * 40,
+        rules=(_recorder(seen),),
+    )
+
+    assert len(seen) == 1
+    assert seen[0].parsed is not None
+    assert seen[0].parsed.language == "python"
+
+
+def test_a_file_with_no_grammar_reaches_a_rule_unparsed(tmp_path: Path) -> None:
+    """Markdown still reaches the codepoint rule, which needs no tree at all."""
+    (tmp_path / "README.md") .write_text("hidden text\n", encoding="utf-8")
+    seen: list[FileContext] = []
+
+    scan_directory(
+        tmp_path,
+        server_id="owner/repo",
+        commit_sha="a" * 40,
+        rules=(_recorder(seen),),
+    )
+
+    assert len(seen) == 1
+    assert seen[0].parsed is None
+
+
+def test_a_file_that_cannot_be_parsed_is_reported(tmp_path: Path) -> None:
+    """A tree full of errors is a rule that silently finds nothing.
+
+    Every other reason a file went unexamined is reported. A file whose
+    grammar could not read it is the same kind of gap, and leaving it out
+    would overstate what the deeper rules actually covered.
+    """
+    (tmp_path / "broken.py").write_text("def broken(:\n", encoding="utf-8")
+
+    report = scan_directory(tmp_path, server_id="owner/repo", commit_sha="a" * 40)
+
+    assert report.skipped == (SkippedFile(path="broken.py", reason="unparsable"),)
+
+
+def test_an_unparsable_file_still_reaches_every_rule(tmp_path: Path) -> None:
+    """Reporting a gap must not create one.
+
+    The tree is partial rather than absent, and the rules that need no tree
+    are unaffected, so dropping the file would lose real coverage in order to
+    report that coverage was lost.
+    """
+    (tmp_path / "broken.py").write_text("def broken(:\n", encoding="utf-8")
+    seen: list[FileContext] = []
+
+    report = scan_directory(
+        tmp_path,
+        server_id="owner/repo",
+        commit_sha="a" * 40,
+        rules=(_recorder(seen),),
+    )
+
+    assert [ctx.relative_path for ctx in seen] == ["broken.py"]
+    assert report.skipped == (SkippedFile(path="broken.py", reason="unparsable"),)
