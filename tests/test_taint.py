@@ -151,3 +151,43 @@ def test_a_call_on_the_parameter_itself_is_still_wrapped() -> None:
     node = _find("function run(path) { exec('cat ' + path.trim()); }", "binary_expression")
 
     assert classify_taint(node, {"path"}) == "wrapped"
+
+
+def test_a_transparent_call_does_not_hide_a_parameter() -> None:
+    """path.join is the bug, not the fix.
+
+    `readFileSync(path.join(BASE, userPath))` is the textbook Node traversal
+    flaw: join happily resolves `../../etc/passwd` straight out of the base.
+    Treating it as a wrapper, the way an escaping helper is treated, would
+    score the single most important case as uncertain and hand it to the
+    model.
+    """
+    node = _find(
+        "function read(p) { readFileSync(path.join(BASE, p)); }",
+        "call_expression",
+        starts="path.join",
+    )
+
+    assert classify_taint(node, {"p"}, transparent=frozenset({"join"})) == "direct"
+
+
+def test_a_transparent_call_still_hides_nothing_it_did_not_wrap() -> None:
+    """Only the named functions are transparent; everything else still wraps."""
+    node = _find(
+        "function read(p) { readFileSync(path.join(BASE, escape(p))); }",
+        "call_expression",
+        starts="path.join",
+    )
+
+    assert classify_taint(node, {"p"}, transparent=frozenset({"join"})) == "wrapped"
+
+
+def test_transparency_is_opt_in() -> None:
+    """The shell rule must keep its behaviour, where every call is a wrapper."""
+    node = _find(
+        "function read(p) { readFileSync(path.join(BASE, p)); }",
+        "call_expression",
+        starts="path.join",
+    )
+
+    assert classify_taint(node, {"p"}) == "wrapped"

@@ -299,3 +299,46 @@ measured.
 **Cost.** Publishing a cost figure invites the same scrutiny as publishing an
 accuracy figure, and a number that moves with model pricing needs a date
 attached. Both are acceptable, and both are the point.
+
+---
+
+## D11 - Reachability decides what counts as tool input, and it is rule-specific
+
+**Decision.** `SHELL-EXEC-UNSAFE` treats any enclosing function's parameters as
+tool input. `PATH-TRAVERSAL` counts only parameters of a function handed
+directly to a tool, resource or prompt registration. The two rules use
+different taint sources on purpose.
+
+**Why.** The proxy has to fit how common the sink is. Shell execution is rare,
+so "a parameter reaches a shell" is nearly always worth a look: across 150 real
+servers that rule produced 10 findings. Filesystem calls are everywhere, and
+the same proxy produced **1,376** on the same servers, of which **1,330** were
+programs reading their own configuration. `readFileSync(configPath)` inside
+`loadConfig(configPath)` is not a traversal risk, and an index that reported it
+would rank every program that opens a file above a genuinely unsafe one.
+
+Restricting to registered handlers brings that to 33 findings across the same
+servers, three of them decided without a model, each one a handler writing or
+reading a path the assistant supplied.
+
+**Cost, accepted and recorded.**
+
+- A handler declared separately and passed by name, `server.tool('x', s,
+  handleRead)`, is not recognised. Resolving it is interprocedural analysis.
+- A server using a registration shape we do not recognise produces no findings
+  from this rule at all, and the loss is invisible rather than reported.
+- A helper called *from* a handler, where the taint genuinely flows, is missed.
+
+**Containment checks are coarse for the same reason.** A finding is suppressed
+when the handler contains `startsWith`, `path.relative` or `realpath`. A
+handler that validates one path and then opens a different one is suppressed
+and missed. Tracking which variable was checked is dataflow analysis, and the
+golden set in Plan 3 is the right thing to tell us whether it is needed, rather
+than building it on a guess.
+
+**What would change the answer.** The golden set showing that the missed cases
+outnumber the false positives this prevents. Measured precision on this rule
+being high while recall is visibly poor points the same way.
+
+**Revisit when.** Plan 3 produces the first measured precision and recall per
+rule.

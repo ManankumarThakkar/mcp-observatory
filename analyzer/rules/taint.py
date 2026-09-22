@@ -39,7 +39,7 @@ LITERAL_NODES = frozenset(
 )
 
 
-def _enclosing_function(node: Node) -> Node | None:
+def enclosing_function(node: Node) -> Node | None:
     """The nearest function containing this node.
 
     Nearest rather than outermost: a callback inside a handler is its own
@@ -97,7 +97,7 @@ def enclosing_parameters(node: Node) -> set[str]:
     the closest thing to that signal without recognising every registration
     style in the ecosystem.
     """
-    function = _enclosing_function(node)
+    function = enclosing_function(node)
     if function is None:
         return set()
 
@@ -113,7 +113,9 @@ def enclosing_parameters(node: Node) -> set[str]:
     return _names_in(container)
 
 
-def classify_taint(node: Node, parameters: set[str]) -> Taint:
+def classify_taint(
+    node: Node, parameters: set[str], *, transparent: frozenset[str] = frozenset()
+) -> Taint:
     """Classify how tool input reaches this expression.
 
     "direct"   a parameter appears bare in the expression. Deterministic
@@ -132,20 +134,29 @@ def classify_taint(node: Node, parameters: set[str]) -> Taint:
                conditional. Reported at low confidence for adjudication.
     "none"     a literal with no identifiers. Not attacker-influenced, and not
                a finding.
+
+    `transparent` names functions that pass taint through rather than hiding
+    it. A caller needs this when the wrapping call is the vulnerability rather
+    than a defence against it: `path.join(BASE, userPath)` resolves
+    `../../etc/passwd` straight out of the base, so treating it as a sanitiser
+    would score the textbook Node traversal bug as merely uncertain. It is
+    opt-in, because for the shell rule every wrapper genuinely might be
+    escaping something.
     """
     identifiers = _identifiers(node)
     if not identifiers:
         return "none"
     if not identifiers & parameters:
         return "indirect"
-    return "direct" if _bare_parameters(node, parameters) else "wrapped"
+    return "direct" if _bare_parameters(node, parameters, transparent) else "wrapped"
 
 
-def _bare_parameters(node: Node, parameters: set[str]) -> bool:
+def _bare_parameters(node: Node, parameters: set[str], transparent: frozenset[str]) -> bool:
     """Whether any parameter reaches the expression without passing through a call.
 
     One escaped value says nothing about the one beside it, so a single bare
-    occurrence is enough to keep the whole expression direct.
+    occurrence is enough to keep the whole expression direct. A call named in
+    `transparent` is not counted as passing through at all.
     """
     stack: list[tuple[Node, bool]] = [(node, False)]
     while stack:
@@ -164,11 +175,27 @@ def _bare_parameters(node: Node, parameters: set[str]) -> bool:
         # but a parameter used directly as the callee does not hide itself.
         function = current.child_by_field_name("function")
         is_call = current.type in ("call_expression", "call")
+        if is_call and function is not None and _called_name(function) in transparent:
+            # Named as passing taint through, so its arguments are no more
+            # hidden than if they had been written inline.
+            is_call = False
         exempt = function.id if function is not None and function.type == "identifier" else None
         for child in current.children:
             nested = inside_call or (is_call and child.id != exempt)
             stack.append((child, nested))
     return False
+
+
+def _called_name(function: Node) -> str:
+    """The bare name being called, whether written plainly or on an object.
+
+    `join(a, b)` and `path.join(a, b)` are the same function, and a rule
+    naming transparent helpers should not have to list both spellings.
+    """
+    if function.type == "member_expression":
+        prop = function.child_by_field_name("property")
+        function = prop if prop is not None else function
+    return function.text.decode("utf-8", "replace") if function.text else ""
 
 
 def _identifiers(node: Node) -> set[str]:
