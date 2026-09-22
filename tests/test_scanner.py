@@ -450,3 +450,57 @@ def test_an_unparsable_file_still_reaches_every_rule(tmp_path: Path) -> None:
 
     assert [ctx.relative_path for ctx in seen] == ["broken.py"]
     assert report.skipped == (SkippedFile(path="broken.py", reason="unparsable"),)
+
+
+def test_test_and_build_files_are_not_scanned(tmp_path: Path) -> None:
+    """47% of real findings came from code no MCP client can invoke.
+
+    Measured over 150 servers: 9 of 19 shell-execution findings sat in webpack
+    configs, test suites and release scripts. Publishing a build script as an
+    MCP server vulnerability is wrong on its face, and it would nearly double
+    the apparent finding count with noise.
+    """
+    for relative in (
+        "test/server.test.ts",
+        "tests/helper.ts",
+        "__tests__/thing.ts",
+        "examples/demo.ts",
+        "scripts/release.ts",
+        "e2e/flow.ts",
+        ".erb/configs/webpack.config.ts",
+        "src/server.spec.ts",
+        "webpack.config.js",
+    ):
+        path = tmp_path / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("const x = 1;\n", encoding="utf-8")
+    seen: list[FileContext] = []
+
+    scan_directory(tmp_path, "owner/repo", "a" * 40, rules=(_recorder(seen),))
+
+    assert seen == []
+
+
+def test_shipped_source_is_still_scanned(tmp_path: Path) -> None:
+    """The exclusion must not swallow ordinary code that happens to match loosely."""
+    for relative in (
+        "src/index.ts",
+        "src/sources/local-git.ts",
+        "lib/testing.ts",
+        "src/contest.ts",
+        "bin/mcp-audit.js",
+    ):
+        path = tmp_path / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("const x = 1;\n", encoding="utf-8")
+    seen: list[FileContext] = []
+
+    scan_directory(tmp_path, "owner/repo", "a" * 40, rules=(_recorder(seen),))
+
+    assert sorted(ctx.relative_path for ctx in seen) == [
+        "bin/mcp-audit.js",
+        "lib/testing.ts",
+        "src/contest.ts",
+        "src/index.ts",
+        "src/sources/local-git.ts",
+    ]

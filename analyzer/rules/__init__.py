@@ -12,6 +12,7 @@ runtime on somebody's repository.
 """
 
 from analyzer.rules.base import Rule
+from analyzer.rules.shell_exec import ShellExecUnsafeRule
 from analyzer.rules.unicode_conceal import UnicodeConcealRule
 
-ALL_RULES: tuple[Rule, ...] = (UnicodeConcealRule(),)
+ALL_RULES: tuple[Rule, ...] = (UnicodeConcealRule(), ShellExecUnsafeRule())
