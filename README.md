@@ -64,11 +64,16 @@ all.** That is 97%, and it held across two independent searches. Over 100,000
 files on GitHub carry the JavaScript server toolkit and over 170,000 carry the
 Python one, against a registry that collapses to 21,356 repositories.
 
-These are candidates rather than confirmed servers, because a search cannot
-tell a plugin from something that merely talks to one, and they are checked
-against their source before anything is published about them. The two
-populations stay separate in every document: the registry figure reproduces
-exactly, and a sample never can.
+A search cannot tell a plugin from something that merely talks to one, so each
+of these is checked against its own source before anything is published about
+it. The two toolkits put servers and clients on different import paths, so the
+check is a fact about the code rather than a guess: 89% of a sample of 100
+carried a server import, and the rest are scanned but withheld.
+
+Registry entries skip that check. Someone published them saying they are
+servers, and the registry carries servers written in languages the check does
+not read. The two populations stay separate in every document: the registry
+figure reproduces exactly, and a sample never can.
 
 ## What this does
 
