@@ -247,15 +247,25 @@ passing it.
   v1 target of ~1,000 servers averaging roughly two semantic findings each,
   that is ~2,000 uncached triage calls of a few hundred tokens apiece - low
   single-digit dollars on Haiku.
-- **The corpus is larger than this estimate assumes.** A crawl on 2026-09-21
-  found 21,356 distinct repositories, against the ~1,000 in the v1 target. At two
-  semantic findings each that is ~42,000 triage calls, well past the 3,000-call
-  spend guard below. v1 therefore scans a **sample** of the corpus rather than
-  all of it, and the sampling method is published alongside the results for the
-  same reason the golden set's is (see `DECISIONS.md` D7). Scanning everything
-  is a scale problem to solve after the measurement is trustworthy, not
-  before. Subsequent nightly runs approach zero, because
-  `finding_id` is deterministic and the cache absorbs every unchanged finding.
+- **Scanning and triage have different costs, and conflating them was an
+  error.** Scanning is cheap. Measured over 80 real repositories at eight
+  concurrent workers, the whole corpus of 35,050, both the registry census and
+  the code-search candidates, projects to **2.0 hours**, inside the six-hour
+  job limit. Sequential would be 9.5 hours and would not fit, which is why the
+  orchestrator is concurrent. Nothing about the scan requires sampling.
+- **Triage is the expensive part, and that is what samples.** A crawl on
+  2026-09-21 found 21,356 distinct repositories against the ~1,000 in the v1
+  target. At two semantic findings each that is ~42,000 triage calls, well past
+  the 3,000-call spend guard below. So v1 scans everything and adjudicates a
+  **sample**, with the sampling method published alongside the results for the
+  same reason the golden set's is (see `DECISIONS.md` D7). Subsequent nightly
+  runs approach zero, because `finding_id` is deterministic and the cache
+  absorbs every unchanged finding.
+- **The two-findings-per-server assumption is untested and probably high.** A
+  real scan of 71 reachable repositories produced 23 findings, about 0.32 each.
+  Only one of the five rules exists today, so that is a floor rather than a
+  forecast, but the estimate above should be re-derived from a measured rate
+  once the deeper rules land rather than carried forward.
 - **Hard spend guard:** the triage layer enforces a configurable maximum of
   3,000 model calls per run. Exceeding it stops adjudication, marks the
   remainder `uncertain`, and completes the run rather than silently spending.
