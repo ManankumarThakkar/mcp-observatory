@@ -67,6 +67,50 @@ SKIP_DIRS = frozenset(
 # very large legitimate file goes undetected.
 MAX_FILE_BYTES = 1024 * 1024
 
+# Directories holding code that ships with the repository but that no MCP
+# client can ever invoke: its tests, its build tooling, its examples.
+#
+# This is a precision decision with a measurement behind it. Over 150 real
+# servers, 9 of 19 shell-execution findings sat in webpack configs, test
+# suites and release scripts. Publishing a build script as an MCP server
+# vulnerability is wrong on its face, and reporting those alongside real
+# handler flaws would nearly double the apparent finding count with noise,
+# while making a server with a thorough test suite score worse than one with a
+# genuinely unsafe tool.
+#
+# The cost is real and accepted: a server whose actual entry point lives under
+# `scripts/` is missed entirely. This list is published with the coverage
+# rules rather than buried here.
+NON_RUNTIME_DIRS = frozenset(
+    {
+        "test",
+        "tests",
+        "__tests__",
+        "spec",
+        "specs",
+        "example",
+        "examples",
+        "sample",
+        "samples",
+        "demo",
+        "demos",
+        "script",
+        "scripts",
+        "benchmark",
+        "benchmarks",
+        "e2e",
+        "fixture",
+        "fixtures",
+        ".erb",
+    }
+)
+
+# The same decision applied to file names rather than directories. Matched on
+# the suffix chain, so `server.test.ts` and `webpack.config.js` are excluded
+# while `contest.ts` and `testing.ts` are not: a substring check would quietly
+# drop both of those, and the second is ordinary library code.
+NON_RUNTIME_STEMS = frozenset({"test", "spec", "config", "bench", "e2e"})
+
 
 def safe_relative_path(relative: Path) -> str:
     """Render a repository path as text that can always be encoded and published.
@@ -89,6 +133,20 @@ def safe_relative_path(relative: Path) -> str:
     whoever reads the finding.
     """
     return relative.as_posix().encode("utf-8", "surrogateescape").decode("utf-8", "replace")
+
+
+def _is_non_runtime(relative: Path) -> bool:
+    """Whether this path is the repository's own tooling rather than its server.
+
+    Neither of these is reported as a skip. A skip records work we wanted to do
+    and could not; this is work we deliberately never wanted, the same as an
+    image or a vendored dependency.
+    """
+    if NON_RUNTIME_DIRS.intersection(part.lower() for part in relative.parent.parts):
+        return True
+
+    # `server.test.ts` has suffixes [".test", ".ts"]; `contest.ts` has [".ts"].
+    return any(suffix.lower().lstrip(".") in NON_RUNTIME_STEMS for suffix in relative.suffixes[:-1])
 
 
 def scan_directory(
@@ -131,6 +189,9 @@ def scan_directory(
         # parent.parts rather than parts, so the check cannot be tripped by a
         # file whose own name happens to match.
         if SKIP_DIRS.intersection(relative.parent.parts):
+            continue
+
+        if _is_non_runtime(relative):
             continue
 
         # Checked before reading, so an oversized file costs a stat rather than
