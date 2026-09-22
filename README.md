@@ -135,6 +135,58 @@ script, so any scanner can be measured on the same footing rather than each
 quoting a number from its own private collection. A result showing the ecosystem
 is healthier than reported is just as publishable as an alarming one.
 
+## How the uncertain half gets judged
+
+A rule can be certain about some things and not others. `execSync(userInput)`
+is decided by reading the code. `execSync(escape(userInput))` is a judgement
+about whether that escaping is any good, and there are thousands of those a
+night across the ecosystem: too ambiguous for a rule, too small to be worth a
+large model call each.
+
+So the design requires that whatever judges them returns a **calibrated
+probability**, and that the threshold we apply to it is published. A number
+that means what it says can be tuned, and its precision and recall reported at
+the cut-off we chose, so a reader can see the trade and disagree with it. A
+verdict written in prose carries no confidence anyone can inspect.
+
+No model is chosen yet, and there is a benchmark rather than an opinion behind
+that. See `DECISIONS.md` D12.
+
+### What has actually been measured
+
+A pilot on 2026-09-22, over 43 real findings from 10 real servers, each
+labelled by hand against a fixed rule: an assistant-supplied argument reaches
+the sink, and nothing constrains where it can go.
+
+| | precision | recall |
+| --- | ---: | ---: |
+| every finding the rules report | 0.81 | 1.00 |
+| only findings the rules call high confidence | 0.62 | 0.14 |
+| a calibrated judgement above 0.5 | 0.89 | 0.94 |
+
+**This is a pilot, not the accuracy figure this project exists to publish**,
+and it should be read with three things in mind. 22 of the 43 findings come
+from a single repository, so the effective sample is closer to ten servers than
+to forty-three findings. The labels were produced by the same project that
+wrote the rules, which is exactly the weakness `DECISIONS.md` D7 criticises in
+published figures elsewhere. And a different, equally defensible labelling
+rule, one that treats a file-reading tool reading any file as doing its job,
+would move a lot of these labels.
+
+The real figure comes from the golden set in D8: randomly sampled, labelled
+through a separate process, and published as an open benchmark with its
+sampling method and a scoring script.
+
+### What it already showed, which is the point of measuring
+
+The rules over-report by roughly a fifth, and **their own confidence flag is
+not a useful quality signal**: findings marked high confidence scored 0.62
+precision against 0.81 for simply reporting everything. That flag means the
+taint path is unambiguous, which turns out not to predict whether anything is
+exploitable. It was built on a reasonable assumption and the first labelled set
+contradicted it. Fixing what it means is now scheduled work rather than a
+guess.
+
 ## How it works
 
 ```mermaid
