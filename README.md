@@ -1,141 +1,173 @@
 # MCP Security Observatory
 
-A public risk index for the Model Context Protocol server ecosystem, published
-with an honest measure of how often it is right.
+![Python](https://img.shields.io/badge/python-3.11%2B-blue)
+![Tests](https://img.shields.io/badge/tests-265%20passing-brightgreen)
+![Checks](https://img.shields.io/badge/ruff%20%7C%20mypy-clean-brightgreen)
+![Status](https://img.shields.io/badge/status-pre--launch-orange)
 
-> **Status: pre-launch.** The analyzer is being built in the open. No
-> ecosystem-wide numbers are published yet, and this README will not claim any
-> until they are.
+**A public risk index for MCP servers, published with an honest measure of how
+often it is wrong.**
 
-## The problem
+AI assistants load plugins called MCP servers. They run on your machine, with
+your privileges, and most editors start them automatically when you open a
+project. There is no sandbox and no review. This reads them without running a
+single line of them.
 
-AI assistants like Claude Code and Cursor extend themselves by loading plugins
-called MCP servers. A crawl of the official registry on 2026-09-21 found
-34,630 published entries pointing at 21,356 distinct repositories, and a
-search of GitHub found thousands more that were never registered anywhere. They run on
-a developer's own machine, with that developer's own privileges, and in most
-editors they start automatically when a project is opened. There is no sandbox
-and no review.
+> **Pre-launch.** Being built in the open. No ecosystem-wide numbers are
+> published yet, and this page will not claim any until they exist. What *has*
+> been measured is below, with its limits stated.
+
+---
+
+## Contents
+
+- [🧭 Who this is for](#-who-this-is-for)
+- [🎯 The problem](#-the-problem)
+- [🔍 What this does](#-what-this-does)
+- [📊 What has actually been measured](#-what-has-actually-been-measured)
+- [⭐ What is different about this one](#-what-is-different-about-this-one)
+- [🏗️ How it works](#-how-it-works)
+- [⚡ Running it](#-running-it)
+- [🗺️ Where it stands](#-where-it-stands)
+- [📁 Repository layout](#-repository-layout)
+- [🛡️ Principles](#-principles)
+
+---
+
+## 🧭 Who this is for
+
+| You are | What you get |
+| --- | --- |
+| **A developer installing MCP servers** | A way to check whether a plugin you are about to give filesystem and shell access is safe, and how much to trust that answer. |
+| **An MCP server maintainer** | Findings about your own server, sent to you privately before they are published anywhere. |
+| **A security researcher** | An open, randomly sampled, hand-labelled benchmark of real findings, plus a scoring script, so any scanner can be measured on the same footing. |
+| **Anyone curious how this is built** | An engineering log of every decision and what it cost, and a methodology page where every published number shows its working. |
+
+You do **not** need to know what MCP is to read the next section.
+
+---
+
+## 🎯 The problem
 
 A plugin describes its own tools in plain English, and the assistant acts on
-those descriptions. That turns the description into an instruction channel
+those descriptions. That turns a description into an instruction channel
 pointed straight at the model. Text hidden inside it can tell the assistant to
-do something the developer never asked for, and the developer never sees it.
+do something you never asked for, and you never see it.
 
 Published research found critical flaws in roughly a third of the servers it
-examined, and path traversal bugs in 82% of the ones that touch files. Checking
-a plugin means reading the source of untrusted software, software you must
-never run in order to inspect it.
+examined, and path-traversal bugs in 82% of those that touch files.
 
-## Counting is not as simple as it sounds
+Checking a plugin means reading the source of untrusted software — software you
+must **never run** in order to inspect it.
 
-Published counts for this ecosystem disagree by a factor of eight. That is not
-because anyone is lying. It is because a registry entry is a registered name,
-not a server, and nobody states which they counted.
+And the ecosystem is bigger than anyone says. Published counts disagree by a
+factor of eight, because a registry entry is a *registered name*, not a server.
+A crawl on 2026-09-21 found:
 
-Three choices move the number by more than 20% each, and we publish all three
-with what they cost:
+```
+34,630  registry entries
+ 8,004  no source to read       (hosted services)
+ 5,270  duplicates of a repository already counted
+21,356  distinct repositories   <- what we actually scan
+```
 
-- **Entries with no source to read.** 8,004 of 34,630 are hosted services with
-  no repository. There is nothing for a static analyser to read, and we never
-  run a server to find out.
-- **Entries pointing at a repository already counted.** 5,270 collapse away.
-  One account alone holds 2,332 registered names pointing at a single
-  repository. Counting names would make that one account 9% of the index.
-- **Repositories that no longer exist.** 19% of a random sample of 150,
-  measured by asking the code host rather than assuming. This one is not in
-  the document below yet: the crawler does not probe, because the scan finds
-  out for free.
+One account alone holds **2,332 registered names pointing at a single
+repository**. And a search of GitHub found **13,291 more servers registered
+nowhere at all**.
 
-[docs/coverage.md](docs/coverage.md) is regenerated by every crawl, and its
-arithmetic closes by construction, so nothing can quietly disappear between
-two numbers.
+<sub>Full working: [docs/methodology.md](docs/methodology.md) · regenerated
+counts: [docs/coverage.md](docs/coverage.md)</sub>
 
-## The registry is not the ecosystem
+---
 
-The registry can be read to the end. A code host cannot: it serves at most
-1,000 results for any one search. So we also run a bounded search for servers
-that were published but never registered, and report it as what it is, a
-sample rather than a count.
+## 🔍 What this does
 
-That sample is the most surprising thing we have measured. One twenty minute
-pass found 13,694 repositories, and **13,291 of them appear in no registry at
-all.** That is 97%, and it held across two independent searches. Over 100,000
-files on GitHub carry the JavaScript server toolkit and over 170,000 carry the
-Python one, against a registry that collapses to 21,356 repositories.
+It reads published MCP servers **without executing a single line of them**.
 
-A search cannot tell a plugin from something that merely talks to one, so each
-of these is checked against its own source before anything is published about
-it. The two toolkits put servers and clients on different import paths, so the
-check is a fact about the code rather than a guess: 89% of a sample of 100
-carried a server import, and the rest are scanned but withheld.
+Five rules look for the specific ways these plugins go wrong:
 
-Registry entries skip that check. Someone published them saying they are
-servers, and the registry carries servers written in languages the check does
-not read. The two populations stay separate in every document: the registry
-figure reproduces exactly, and a sample never can.
+| Rule | Looks for | Built |
+| --- | --- | :---: |
+| `UNICODE-CONCEAL` | Characters hidden from human eyes | ✅ |
+| `SHELL-EXEC-UNSAFE` | Tool input reaching a command interpreter | ✅ |
+| `PATH-TRAVERSAL` | Tool input reaching the filesystem unchecked | ✅ |
+| `TOOL-DESC-INJECTION` | Instructions smuggled into tool descriptions | ⏳ |
+| `SCOPE-OVERBROAD` | Permissions far wider than the plugin needs | ⏳ |
 
-## What this does
+Clear-cut cases are decided by code alone and never cost anything. The
+genuinely ambiguous ones go to a judgement model, and **every one of those
+judgements is scored against a hand-labelled answer key.**
 
-It reads published MCP servers without executing a single line of them.
+Anything a plugin ships that its users never run — tests, build scripts,
+examples — is not scanned at all, because a flaw there is not a flaw an
+assistant can reach. That single decision removed nearly half the findings on a
+trial run.
 
-Five rules look for the specific ways these plugins go wrong: characters hidden
-from human eyes, instructions smuggled into tool descriptions, unchecked file
-paths, unsafe shell commands, and permissions far wider than the plugin needs.
+> **Which servers get which checks.** The hidden-character rule reads every
+> server, because it needs no parser. The deeper rules read code, and today
+> they cover **TypeScript and JavaScript** — measured at 50% of both the
+> registry and the unregistered population, against Python's 26–38%. Python
+> servers get the character check now and the deeper rules next. **A figure
+> from one language is never presented as an ecosystem-wide one.**
 
-Three are built. Anything a plugin ships that its users never run - its tests,
-its build scripts, its examples - is not scanned, because a flaw there is not a
-flaw an assistant can reach. That single rule removed nearly half the findings
-on a trial run over 150 servers.
+---
 
-Clear cut cases are decided by code alone. The genuinely ambiguous ones go to a
-language model, and every one of those judgements is scored against a hand
-labelled answer key.
+## 📊 What has actually been measured
 
-The result is a continuously updated public index, published with its own
-accuracy beside it. If the tool is wrong fifteen percent of the time, the
-dashboard says fifteen percent. Serious findings go privately to maintainers
-first, and a maintainer who asks to be excluded is excluded.
+A pilot on 2026-09-22: **43 real findings from 10 real servers**, each labelled
+by hand by reading the code.
 
-## What is different about this one
+| | precision | recall |
+| --- | ---: | ---: |
+| Every finding the rules report | **0.81** | **1.00** |
+| Only findings the rules call high confidence | 0.62 | 0.14 |
+| A calibrated judgement above 0.5 | 0.89 | 0.94 |
 
-Other MCP scanners exist, and some are good. They will read a server you point
-them at and tell you what looks wrong. Three things are missing from the field.
+**This is a pilot, not the accuracy figure this project exists to publish.**
+The sample is concentrated (22 of 43 findings come from one repository), and
+the same project wrote both the rules and the labels — which is exactly the
+weakness we criticise in figures published elsewhere.
 
-**Accuracy measured on a random sample.** Where scanners report accuracy at all,
-it is usually measured against a set of examples the authors chose themselves,
-which mostly shows whether the rules match the cases they were written from. The
-golden set here is sampled at random from real findings across the whole scanned
-corpus, and the sampling method is published next to the numbers. Expect a figure
-well below perfect. That is the point: a scanner whose error rate nobody knows is
-an opinion, and a perfect score is usually a sign that the measurement was
+**The most useful result was about us.** Our own "high confidence" flag scored
+*worse* than reporting everything. It means "the taint path is unambiguous",
+which turns out not to predict whether anything is exploitable. That assumption
+shaped two rules and survived only because nothing had ever scored it.
+
+<sub>Method, caveats and what changed as a result:
+[docs/methodology.md](docs/methodology.md)</sub>
+
+---
+
+## ⭐ What is different about this one
+
+Other MCP scanners exist, and some are good. Four things are missing from the
+field.
+
+**📐 Accuracy measured on a random sample.** Where scanners report accuracy at
+all, it is usually against examples the authors chose themselves — which mostly
+shows whether the rules match the cases they were written from. Expect a figure
+well below perfect here. A perfect score is usually a sign the measurement was
 circular.
 
-**A trend over time.** Existing tools give a snapshot. Nobody can currently
-answer whether this ecosystem is getting safer or worse. This runs nightly and
-keeps the history, so the question becomes answerable.
+**📈 A trend over time.** Existing tools give a snapshot. Nobody can currently
+answer whether this ecosystem is getting safer. This runs nightly and keeps the
+history.
 
-**Disclosure before publication.** Serious findings are withheld for ninety days
-and sent privately to the maintainer first, enforced in code rather than promised
-in a policy document. Scanning someone's project and publishing the result
-carries an obligation, and that obligation should be executable.
+**🔒 Disclosure before publication.** Serious findings are withheld and sent
+privately to the maintainer first — enforced in code, not promised in a policy
+document.
 
-**What it costs to run.** Most checks never call a model at all: characters
-that cannot appear innocently are caught by code, and a dangerous pattern with
-an obvious path from input to sink is decided without asking anything. Only
-genuinely ambiguous cases are sent to a model, and repeated findings are cached
-by content, so scanning an unchanged server again is free.
+**💰 A published cost per server.** Most checks never call a model. "It's
+cheap" is an adjective; a number you can check is not.
 
-Cost per server scanned is published next to the accuracy figure, and for the
-same reason: "it's cheap" is an adjective, and a number you can check is not.
-Expect most servers to cost nothing.
+The labelled corpus ships as an **open benchmark with a scoring script**, so
+any scanner can be measured on the same footing rather than quoting a number
+from its own private collection. A result showing the ecosystem is healthier
+than reported is just as publishable as an alarming one.
 
-The labeled corpus itself is published as an open benchmark with a scoring
-script, so any scanner can be measured on the same footing rather than each
-quoting a number from its own private collection. A result showing the ecosystem
-is healthier than reported is just as publishable as an alarming one.
+---
 
-## How it works
+## 🏗️ How it works
 
 ```mermaid
 flowchart TD
@@ -157,57 +189,69 @@ flowchart TD
 ```
 
 Each stage writes a file, so any stage can be run, tested and replaced on its
-own. The scoring loop on the right is what produces the published accuracy
-figure, and it gates every pull request.
+own. The scoring loop on the right produces the published accuracy figure, and
+it gates every pull request.
 
-## Running it
+---
 
-Requires Python 3.11 or newer.
+## ⚡ Running it
+
+**Requires Python 3.11+.**
 
 ```bash
 python3.12 -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
 ```
 
-Scan a single public server:
+**Scan one server:**
 
 ```bash
 mcp-observatory scan --repo-url https://github.com/owner/repo --server-id owner/repo
 ```
 
-Output is JSON on stdout.
-
-Read the registry and work out what there is to scan:
+**See what there is to scan** (~90 seconds, no token needed, so anyone can
+reproduce the published figure):
 
 ```bash
 mcp-observatory crawl
 ```
 
-That takes about 90 seconds. It rewrites [docs/coverage.md](docs/coverage.md)
-and writes the full corpus to `.cache/corpus.json`, which is not committed
-because it is several megabytes.
-
-To also search for servers that were never registered:
+**Also find servers registered nowhere** (~20 minutes; code search allows ten
+requests a minute):
 
 ```bash
 GITHUB_TOKEN=... mcp-observatory crawl --with-code-search
 ```
 
-That adds about twenty minutes, because code search allows ten requests a
-minute. The token is read from the environment rather than a flag, so it stays
-out of shell history. The plain `crawl` above needs no token, so the published
-figure can be reproduced by anyone.
+The token is read from the environment rather than a flag, so it stays out of
+your shell history.
 
-A full run will also write `data/findings.jsonl` and `data/findings.sarif`,
-and the SARIF file uploads directly to GitHub code scanning. That part is not
-built yet.
+**Checks:**
 
 ```bash
-pytest -v        # test suite
+pytest -v        # 265 tests
 ruff check .     # lint
+mypy             # types
 ```
 
-## Repository layout
+---
+
+## 🗺️ Where it stands
+
+| Stage | Status |
+| --- | --- |
+| Analyzer core, fetcher, rule contract, CI | ✅ Done |
+| Registry crawler + coverage reporting | ✅ Done |
+| Discovery of unregistered servers | ✅ Done |
+| Scan orchestrator, 35,050 repos in ~2 hours | ✅ Done |
+| Detection rules | 🔨 3 of 5 |
+| SARIF output, disclosure gate, nightly pipeline | ⏳ Next |
+| Model adjudication + published accuracy | ⏳ Planned |
+| Public dashboard | ⏳ Planned |
+
+---
+
+## 📁 Repository layout
 
 | Path | Purpose |
 |---|---|
@@ -222,23 +266,9 @@ ruff check .     # lint
 | `data/` | Committed scan artifacts. Git history provides the time series |
 | `web/` | Static dashboard |
 
-## Coverage in v1
+---
 
-One rule runs against every server, because it reads characters and needs no
-parser at all. The four deeper rules read code, and in v1 they cover TypeScript
-and JavaScript.
-
-That is where the ecosystem actually is. Measured over 463 repositories:
-TypeScript and JavaScript together are 50% of both the registry and the
-unregistered population, against Python's 26% and 38%. One grammar covers the
-whole JavaScript family, so half the ecosystem costs roughly one language's
-work.
-
-Python servers get the concealment check in v1 and the deeper rules first after
-it. Results always state which servers got which, and a figure derived from one
-language is never presented as an ecosystem-wide one. See `DECISIONS.md` D6.
-
-## Principles
+## 🛡️ Principles
 
 - **Never execute a scanned server.** The fetcher may invoke `git` and nothing
   else. A test enforces this, not a convention.
@@ -247,6 +277,9 @@ language is never presented as an ecosystem-wide one. See `DECISIONS.md` D6.
   private disclosure window, enforced in code.
 - **No exploit code, ever.**
 
-See [`SECURITY.md`](SECURITY.md) for the disclosure policy,
-[`DECISIONS.md`](DECISIONS.md) for the engineering log, and
-[`docs/specs/`](docs/specs/) for the design.
+---
+
+📖 [`docs/methodology.md`](docs/methodology.md) — how every number was produced
+🔐 [`SECURITY.md`](SECURITY.md) — disclosure policy
+🧾 [`DECISIONS.md`](DECISIONS.md) — engineering log, every decision and what it cost
+📐 [`docs/specs/`](docs/specs/) — the design
