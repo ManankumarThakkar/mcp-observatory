@@ -56,7 +56,7 @@ CALL_QUERY = """
 (call_expression function: (identifier) @name) @call
 (call_expression
   function: (member_expression
-    object: (identifier) @object
+    object: (_) @object
     property: (property_identifier) @name)) @call
 """
 
@@ -67,6 +67,21 @@ CONFIDENCE_BY_TAINT: dict[str, Confidence] = {
 }
 
 MAX_EVIDENCE_CHARS = 160
+
+
+def _root_identifier(node: Node) -> Node | None:
+    """The leftmost identifier of a member expression chain.
+
+    `fs.promises` resolves to `fs`, so a call reached through a sub-namespace
+    is still attributed to the module the file imported.
+    """
+    current = node
+    while current.type == "member_expression":
+        object_node = current.child_by_field_name("object")
+        if object_node is None:
+            return None
+        current = object_node
+    return current if current.type == "identifier" else None
 
 
 def _called_name(function: Node, parsed: ParsedFile) -> str:
@@ -150,7 +165,19 @@ class PathTraversalRule:
 
             objects = capture.get("object", [])
             if objects:
-                if parsed.text(objects[0]) not in bindings.namespaces:
+                # The leftmost identifier, not the immediate object, so
+                # `fs.promises.readFile` resolves through `fs`. Matching only a
+                # bare identifier made every `fs.promises.*` call invisible
+                # while `fs/promises` was declared supported.
+                root = _root_identifier(objects[0])
+                if root is None:
+                    continue
+                # Either binding kind can name an object here. A namespace is
+                # the module itself, and `import { promises as fsp }` puts a
+                # module object into the direct set. An unbound name, `db` or
+                # `storage`, still matches neither.
+                root_name = parsed.text(root)
+                if root_name not in bindings.namespaces and root_name not in bindings.direct:
                     continue
             elif name not in bindings.direct:
                 continue

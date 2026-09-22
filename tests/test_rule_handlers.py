@@ -83,3 +83,29 @@ def test_every_registration_name_is_recognised() -> None:
     for name in REGISTRATION_NAMES:
         source = f"server.{name}('r', s, async ({{ file }}) => {{ readFileSync(file); }});"
         assert _is_handler(source), name
+
+
+def test_a_function_declared_inside_a_handler_is_not_the_handler() -> None:
+    """The false positive D11 exists to exclude, reintroduced by the walk.
+
+    Climbing to the nearest enclosing call sails straight past a function
+    boundary, so a helper declared in a handler's body inherits the handler's
+    reachability while its parameters come from its own caller.
+    """
+    source = (
+        "server.registerTool('t', s, async ({ name }) => {"
+        " function loadConfig(p) { return readFileSync(p); }"
+        " return loadConfig(name); });"
+    )
+
+    assert not _is_handler(source)
+
+
+def test_an_arrow_assigned_inside_a_handler_is_not_the_handler() -> None:
+    source = (
+        "server.registerTool('t', s, async ({ name }) => {"
+        " const load = (p) => readFileSync(p);"
+        " return load(name); });"
+    )
+
+    assert not _is_handler(source)

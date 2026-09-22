@@ -189,3 +189,36 @@ def test_the_vulnerable_fixture_is_caught_in_full() -> None:
 
 def test_the_clean_fixture_produces_nothing() -> None:
     assert _analyze(_fixture("clean/path_traversal_safe_server.ts")) == []
+
+
+def test_the_promises_namespace_is_reached() -> None:
+    """`fs/promises` is in the module list, so `fs.promises.readFile` must count.
+
+    The member query only matched a bare identifier object, so every
+    `fs.promises.*` call was invisible while the module was declared supported.
+    """
+    source = (
+        "import fs from 'fs';\n"
+        "server.registerTool('t', s, async ({ file }) => fs.promises.readFile(file));\n"
+    )
+
+    assert len(_analyze(source)) == 1
+
+
+def test_a_renamed_promises_binding_is_reached() -> None:
+    source = (
+        "import { promises as fsp } from 'fs';\n"
+        "server.registerTool('t', s, async ({ file }) => fsp.readFile(file));\n"
+    )
+
+    assert len(_analyze(source)) == 1
+
+
+def test_an_unrelated_object_is_still_ignored() -> None:
+    """The loosening must not undo the precision guard it sits beside."""
+    source = (
+        "import { readFileSync } from 'fs';\n"
+        "server.registerTool('t', s, async ({ file }) => storage.readFileSync(file));\n"
+    )
+
+    assert _analyze(source) == []

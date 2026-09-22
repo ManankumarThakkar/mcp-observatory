@@ -3,6 +3,7 @@
 from tree_sitter import Node
 
 from analyzer.parsing.trees import ParsedFile
+from analyzer.rules.taint import FUNCTION_NODES
 
 # The calls that hand a function to the protocol. `registerTool` is the
 # current SDK, `tool` the older helper, and `setRequestHandler` the low-level
@@ -34,9 +35,11 @@ def is_tool_handler(function: Node, parsed: ParsedFile) -> bool:
     reaching the disk. Measured on 150 real servers, 97% of candidate findings
     were the former.
 
-    A nested callback does not count, even inside a handler. Its parameters
-    come from whatever is iterating, not from the assistant, so treating them
-    as tool input would attribute the model's influence to a loop variable.
+    Nothing nested inside a handler counts as one, whether it is a callback
+    passed to another call or a function declared in the handler's body. Its
+    parameters come from whoever calls it rather than from the assistant, so
+    treating them as tool input would attribute the model's influence to a
+    loop variable or a local helper.
 
     Known gap: a handler declared separately and passed by name,
     `server.tool('x', s, handleRead)`, is not recognised, because this reads
@@ -46,6 +49,12 @@ def is_tool_handler(function: Node, parsed: ParsedFile) -> bool:
     current = function
     while current.parent is not None:
         parent = current.parent
+        if parent.type in FUNCTION_NODES:
+            # A function declared inside a handler's body is not that handler.
+            # Its parameters come from whoever calls it, so climbing past this
+            # boundary would hand it the assistant's reachability and
+            # reintroduce the false positive this rule exists to exclude.
+            return False
         if parent.type == "arguments" and parent.parent is not None:
             # The first call this function is an argument to decides it, and
             # the walk stops either way. Climbing past it would let an
