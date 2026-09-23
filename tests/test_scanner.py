@@ -13,6 +13,8 @@ class _recorder:
     """A rule that records the contexts it was handed and finds nothing."""
 
     rule_id = "TEST-RECORDER"
+    title = "Records the contexts it was handed"
+    description = "A test double, never registered in ALL_RULES."
 
     def __init__(self, seen: list[FileContext]) -> None:
         self._seen = seen

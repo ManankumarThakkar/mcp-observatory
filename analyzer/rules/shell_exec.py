@@ -114,6 +114,14 @@ class ShellExecUnsafeRule:
     """
 
     rule_id = "SHELL-EXEC-UNSAFE"
+    title = "Tool input reaching a command interpreter"
+    description = (
+        "A value an assistant supplies reaches a shell. Node's exec and "
+        "execSync run their argument through a shell every time, and spawn "
+        "or execFile do so when asked. A shell reached by attacker- "
+        "influenced text is arbitrary code execution with the developer's "
+        "own privileges and no sandbox."
+    )
 
     def analyze(self, ctx: FileContext) -> list[Finding]:
         parsed: ParsedFile | None = ctx.parsed

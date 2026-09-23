@@ -266,6 +266,14 @@ class ScopeOverbroadRule:
     """
 
     rule_id = "SCOPE-OVERBROAD"
+    title = "Server reach wider than its tools require"
+    description = (
+        "The server listens on every network interface, accepts every web "
+        "origin, or treats the home directory or filesystem root as the "
+        "extent of what it will serve. Each is wider than a local tool "
+        "needs whatever its tools do, and widens what any other flaw can "
+        "reach."
+    )
 
     def analyze(self, ctx: FileContext) -> list[Finding]:
         parsed: ParsedFile | None = ctx.parsed

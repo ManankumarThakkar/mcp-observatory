@@ -43,4 +43,12 @@ class Rule(Protocol):
 
     rule_id: str
 
+    # What a reader is told about this rule wherever findings are published.
+    # These live on the rule rather than in a table beside it, so a rule
+    # cannot ship without them and the two cannot drift apart. SARIF requires
+    # a short description, a full description and help text per rule, and a
+    # document missing them is rejected at upload rather than here.
+    title: str
+    description: str
+
     def analyze(self, ctx: FileContext) -> list[Finding]: ...

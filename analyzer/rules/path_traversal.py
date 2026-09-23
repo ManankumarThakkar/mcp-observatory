@@ -137,6 +137,13 @@ class PathTraversalRule:
     """
 
     rule_id = "PATH-TRAVERSAL"
+    title = "Tool input reaching the filesystem unchecked"
+    description = (
+        "A parameter of a registered tool handler reaches a file operation "
+        "without anything proving the path stayed inside its intended "
+        "directory. Note that path.join and path.resolve do not provide "
+        "that proof: both resolve a leading ../ straight out of the base."
+    )
 
     def analyze(self, ctx: FileContext) -> list[Finding]:
         parsed: ParsedFile | None = ctx.parsed
