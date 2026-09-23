@@ -16,6 +16,8 @@ class _StubRule:
     """
 
     rule_id = "STUB-RULE"
+    title = "A stub"
+    description = "Exists only to prove the protocol can be satisfied."
 
     def analyze(self, ctx: FileContext) -> list[Finding]:
         return [

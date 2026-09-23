@@ -34,6 +34,14 @@ def _classify(char: str) -> tuple[str, Confidence] | None:
 
 class UnicodeConcealRule:
     rule_id = "UNICODE-CONCEAL"
+    title = "Characters hidden from human review"
+    description = (
+        "Source contains codepoints that are invisible to a human reader "
+        "but are read normally by a language model: tag characters, "
+        "bidirectional overrides and zero-width marks. Text hidden this way "
+        "can instruct an assistant to do something the developer never sees "
+        "and never approved."
+    )
 
     def analyze(self, ctx: FileContext) -> list[Finding]:
         findings: list[Finding] = []

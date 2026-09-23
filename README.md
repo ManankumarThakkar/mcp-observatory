@@ -1,7 +1,7 @@
 # MCP Security Observatory
 
 ![Python](https://img.shields.io/badge/python-3.11%2B-blue)
-![Tests](https://img.shields.io/badge/tests-315%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-389%20passing-brightgreen)
 ![Checks](https://img.shields.io/badge/ruff%20%7C%20mypy-clean-brightgreen)
 ![Status](https://img.shields.io/badge/status-pre--launch-orange)
 
@@ -226,10 +226,24 @@ GITHUB_TOKEN=... mcp-observatory crawl --with-code-search
 The token is read from the environment rather than a flag, so it stays out of
 your shell history.
 
+**Run the whole thing.** The crawl writes the index, one entry per
+repository; the scan reads it and publishes what may be published:
+
+```bash
+mcp-observatory crawl
+mcp-observatory scan --index .cache/server_index.jsonl
+```
+
+That scans every server in the index, folds the results into a history, and
+writes `findings.jsonl`, `findings.sarif` and `summary.json` under `data/`.
+Findings still inside their disclosure window stay in the local history and
+never reach `data/`, though the counts in `summary.json` include them, so the
+totals are honest about what is being withheld.
+
 **Checks:**
 
 ```bash
-pytest -v        # 315 tests
+pytest -v        # 389 tests
 ruff check .     # lint
 mypy             # types
 ```
@@ -245,8 +259,8 @@ mypy             # types
 | Discovery of unregistered servers | ✅ Done |
 | Scan orchestrator, 35,050 repos in ~2 hours | ✅ Done |
 | Detection rules | ✅ 5 of 5 |
-| SARIF output, disclosure gate, nightly pipeline | ⏳ Next |
-| Model adjudication + published accuracy | ⏳ Planned |
+| SARIF output, disclosure gate, nightly pipeline | ✅ Done |
+| Model adjudication + published accuracy | ⏳ Next |
 | Public dashboard | ⏳ Planned |
 
 ---

@@ -272,6 +272,14 @@ class ToolDescInjectionRule:
     """
 
     rule_id = "TOOL-DESC-INJECTION"
+    title = "Instructions planted in tool metadata"
+    description = (
+        "A tool or parameter description reads as an instruction addressed "
+        "to the assistant rather than as a description of what the tool "
+        "does. Descriptions are read by the model before it chooses a tool "
+        "and are never shown to the developer, which makes them an "
+        "instruction channel."
+    )
 
     def analyze(self, ctx: FileContext) -> list[Finding]:
         parsed: ParsedFile | None = ctx.parsed

@@ -104,3 +104,48 @@ def test_every_declared_severity_and_confidence_is_accepted() -> None:
 
     for confidence in get_args(Confidence):
         assert _finding(confidence=confidence).confidence == confidence
+
+
+def test_a_finding_round_trips_through_its_dictionary() -> None:
+    """The pipeline reads records back to decide what may be published.
+
+    Rebuilding by hand at the call site would restate the field list, and the
+    two copies would drift the moment a field is added.
+    """
+    finding = Finding(
+        server_id="owner/repo",
+        commit_sha="a" * 40,
+        rule_id="UNICODE-CONCEAL",
+        severity="critical",
+        confidence="high",
+        location=Location(file="src/index.ts", line=42),
+        evidence="unicode-tag-block U+E0041",
+    )
+
+    assert Finding.from_dict(finding.to_dict()) == finding
+
+
+def test_reading_a_record_ignores_fields_added_by_later_layers() -> None:
+    """A merged record carries first_seen, last_seen and a disclosure state.
+
+    Those belong to the history rather than to the finding, and a reader that
+    choked on them would make the history unreadable by the layer that wrote
+    it.
+    """
+    finding = Finding(
+        server_id="owner/repo",
+        commit_sha="a" * 40,
+        rule_id="PATH-TRAVERSAL",
+        severity="high",
+        confidence="low",
+        location=Location(file="src/a.ts", line=1),
+        evidence="readFileSync(p)",
+    )
+    record = {
+        **finding.to_dict(),
+        "first_seen": "2026-08-01T00:00:00Z",
+        "last_seen": "2026-09-20T00:00:00Z",
+        "disclosure_state": "withheld",
+    }
+
+    assert Finding.from_dict(record) == finding
