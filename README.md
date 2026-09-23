@@ -1,7 +1,7 @@
 # MCP Security Observatory
 
 ![Python](https://img.shields.io/badge/python-3.11%2B-blue)
-![Tests](https://img.shields.io/badge/tests-290%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-315%20passing-brightgreen)
 ![Checks](https://img.shields.io/badge/ruff%20%7C%20mypy-clean-brightgreen)
 ![Status](https://img.shields.io/badge/status-pre--launch-orange)
 
@@ -92,7 +92,7 @@ Five rules look for the specific ways these plugins go wrong:
 | `SHELL-EXEC-UNSAFE` | Tool input reaching a command interpreter | ✅ |
 | `PATH-TRAVERSAL` | Tool input reaching the filesystem unchecked | ✅ |
 | `TOOL-DESC-INJECTION` | Instructions smuggled into tool descriptions | ✅ |
-| `SCOPE-OVERBROAD` | Permissions far wider than the plugin needs | ⏳ |
+| `SCOPE-OVERBROAD` | Permissions far wider than the plugin needs | ✅ |
 
 Clear-cut cases are decided by code alone and never cost anything. The
 genuinely ambiguous ones go to a judgement model, and **every one of those
@@ -229,7 +229,7 @@ your shell history.
 **Checks:**
 
 ```bash
-pytest -v        # 290 tests
+pytest -v        # 315 tests
 ruff check .     # lint
 mypy             # types
 ```
@@ -244,7 +244,7 @@ mypy             # types
 | Registry crawler + coverage reporting | ✅ Done |
 | Discovery of unregistered servers | ✅ Done |
 | Scan orchestrator, 35,050 repos in ~2 hours | ✅ Done |
-| Detection rules | 🔨 4 of 5 |
+| Detection rules | ✅ 5 of 5 |
 | SARIF output, disclosure gate, nightly pipeline | ⏳ Next |
 | Model adjudication + published accuracy | ⏳ Planned |
 | Public dashboard | ⏳ Planned |

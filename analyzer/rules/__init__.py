@@ -13,6 +13,7 @@ runtime on somebody's repository.
 
 from analyzer.rules.base import Rule
 from analyzer.rules.path_traversal import PathTraversalRule
+from analyzer.rules.scope import ScopeOverbroadRule
 from analyzer.rules.shell_exec import ShellExecUnsafeRule
 from analyzer.rules.tool_desc import ToolDescInjectionRule
 from analyzer.rules.unicode_conceal import UnicodeConcealRule
@@ -22,4 +23,5 @@ ALL_RULES: tuple[Rule, ...] = (
     ShellExecUnsafeRule(),
     PathTraversalRule(),
     ToolDescInjectionRule(),
+    ScopeOverbroadRule(),
 )

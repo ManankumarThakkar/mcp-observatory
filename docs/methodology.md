@@ -165,6 +165,38 @@ included the bare adverbs "always" and "never", and flagged the entirely
 descriptive "the original file is never modified in place". Removing them took
 the projected volume from roughly 20,200 findings to 1,825.
 
+## What "overbroad scope" means here, and what it cannot see
+
+The spec defines this check against `allowed_directories` and similar
+configuration keys. Measured across 150 repositories, 47 of them real MCP
+servers, those keys barely exist in TypeScript: `allowedDirectories` appeared
+zero times, `allowedPaths` and `allowedHosts` once each, and every `roots` hit
+was a local variable of that name.
+
+So the check reads three things it can actually find in source, each wider
+than a local tool requires whatever its tools do:
+
+| What | In how many servers |
+| --- | ---: |
+| Listens on every network interface rather than localhost | 21% |
+| Accepts every web origin | 13% |
+| Serves from the home directory or the filesystem root | 28% |
+
+**One quarter of servers take their allowed directories from the launch
+command.** That is configuration supplied at startup and no static analyser
+reads it. This check cannot see those scopes, by any definition, and neither
+can any tool that reads only source. Stated here rather than left to look like
+a clean result.
+
+Two further limits, both deliberate. The filesystem half fires only on a
+scope-shaped variable name, because a bare `"/"` appears in 38% of servers and
+is almost entirely route definitions - matching the value alone would report
+every server with a homepage. And only literal values are read: a scope
+computed at runtime is not evidence of anything, and guessing would put noise
+in front of a model.
+
+See `DECISIONS.md` D13.
+
 ## The accuracy pilot, 2026-09-22
 
 The first time anything in this project was scored rather than asserted.

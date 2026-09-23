@@ -400,3 +400,60 @@ written.
 
 **Revisit when.** Plan 3 produces the first measured precision and recall per
 rule, which is the same trigger as D11.
+
+---
+
+## D13 - SCOPE-OVERBROAD is redefined around reach, not around a config key
+
+**Decision.** `SCOPE-OVERBROAD` reports three things it can read from source:
+a server that listens on every network interface, one that accepts every web
+origin, and one that treats the home directory or the filesystem root as the
+extent of what it will serve. It does **not** look for `allowed_directories`
+and the related keys spec section 7 names.
+
+**Why.** Those keys barely exist in the language v1 covers. Measured across 150
+repositories, 47 of them real MCP servers:
+
+| Key the spec names | Repositories |
+| --- | ---: |
+| `allowedDirectories` | 0 |
+| `allowedPaths` | 1 |
+| `allowedHosts` | 1 |
+| `roots` | 4, every one a local variable of that name |
+
+It is a Python reference-server convention that did not transfer. Built to the
+written definition, this rule would have found nothing, and a check that never
+fires is a line in a coverage table rather than a check.
+
+**What replaced it is measured too.** Binding every interface appears in 21% of
+those servers, a wildcard origin in 13%, and the home directory or filesystem
+root used as a base in 28%. Each is wider than a local tool requires whatever
+its tools happen to do, which is the property spec section 7 asks for.
+
+**The part that is not detectable at all, stated rather than hidden.** A
+quarter of servers take their allowed directories from `process.argv`. That is
+configuration supplied at launch, and no static analyser reads it. No
+definition of this rule recovers those, and the published coverage says so
+rather than implying the scan looked.
+
+**Cost, accepted.**
+
+- A scope declared only in a launch command, a container file or a README is
+  invisible. This is the largest gap and it is inherent.
+- The filesystem check requires a scope-shaped variable name. A root assigned
+  to an unusually named variable is missed. The alternative is worse: a bare
+  `"/"` appears in 38% of servers and is almost entirely route definitions, so
+  matching the value alone would report every server with a homepage.
+- Only literal values are read. A scope computed at runtime is not evidence of
+  anything, and guessing would put noise in front of a model.
+
+**Severity and adjudication are unchanged.** Medium, and every finding is low
+confidence, both as spec section 7 has them. Whether a given scope is wider
+than a given set of tools needs is a semantic judgement this rule does not
+make; it answers only whether the scope is one of the few that are overbroad
+regardless.
+
+**Revisit when.** The golden set says whether the three classes are the right
+ones, or whether the name list on the filesystem check is too narrow. If
+`process.argv` scopes turn out to dominate real misconfiguration, the honest
+response is to say this rule cannot see them rather than to widen it.
