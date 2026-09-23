@@ -64,3 +64,26 @@ def test_the_file_is_one_record_per_line(tmp_path: Path) -> None:
     write_server_index(path, [_record("a/one"), _record("b/two")])
 
     assert len(path.read_text(encoding="utf-8").splitlines()) == 2
+
+
+def test_a_hand_edited_index_cannot_smuggle_a_local_path_past_the_fetcher(
+    tmp_path: Path,
+) -> None:
+    """The index file is a second way into the fetcher, and it had no check.
+
+    The https rule was enforced by the registry parser alone. Anything written
+    to this file bypassed it, and the fetcher allows `file:` for its own tests,
+    so an index holding `file:///` would clone a directory off the runner's
+    disk and publish its paths under an attacker's server_id. The whole point
+    of the rule is that the repository URL is never trusted, and a file on disk
+    is no more trustworthy than the registry it came from.
+    """
+    path = tmp_path / "server_index.jsonl"
+    path.write_text(
+        '{"server_id": "attacker/controlled", "repo_url": "file:///home/runner/.ssh",'
+        ' "discovered_via": "registry"}\n',
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="https"):
+        load_server_index(path)

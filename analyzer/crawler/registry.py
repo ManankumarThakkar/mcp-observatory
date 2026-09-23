@@ -13,17 +13,29 @@ JsonObject = dict[str, Any]
 
 REGISTRY_ENDPOINT = "https://registry.modelcontextprotocol.io/v0/servers"
 
-# The only transport a registry entry may name. Anyone can publish to the
-# registry, so a repository URL is hostile input, and this is the boundary it
-# enters through.
+# The only transport a repository URL may name. Anyone can publish to the
+# registry, so every repository URL is hostile input wherever it reaches us
+# from.
 #
 # The fetcher's own allowlist is wider: it permits `file:` so its tests can
-# clone local repositories. A `file:///` entry here would therefore have it
-# pull a repository off the runner's own disk and publish those paths under
-# whatever server_id the attacker chose. Narrowing at the point of entry is
-# better than widening the fetcher's tests, because the fetcher cannot know
-# whether its caller trusted the URL.
+# clone local repositories. A `file:///` URL would therefore have it pull a
+# repository off the runner's own disk and publish those paths under whatever
+# server_id the attacker chose. Narrowing before the fetcher is better than
+# widening the fetcher's tests, because the fetcher cannot know whether its
+# caller trusted the URL.
 ALLOWED_REPOSITORY_SCHEME = "https"
+
+
+def permits_cloning(url: str) -> bool:
+    """Whether the fetcher may be handed this repository URL.
+
+    One predicate for two behaviours. A crawl skips a non-https entry, because
+    that is a fact about one server rather than a broken response, while a
+    record refuses to exist with one. Both need the same answer, so neither
+    carries its own copy of it: if they disagreed, a crawl would die on a
+    record it used to skip.
+    """
+    return urlparse(url).scheme == ALLOWED_REPOSITORY_SCHEME
 
 # The registry holds every published version of every server, so the crawl asks
 # for latest only.
@@ -70,6 +82,22 @@ class ServerRecord:
     server_id: str
     repo_url: str
     discovered_via: str
+
+    def __post_init__(self) -> None:
+        """Refuse a URL the fetcher must never be handed.
+
+        The rule belongs to the record rather than to one of its producers.
+        It lived in the registry parser alone, which left `load_server_index`
+        reading records straight off disk with nothing checking them, so a
+        hand-edited index reached the same fetcher by a route the rule did not
+        cover. Every producer is covered here, including ones not written yet,
+        which is the same reason Finding validates its severity at
+        construction.
+        """
+        if not permits_cloning(self.repo_url):
+            raise ValueError(
+                f"repo_url must be {ALLOWED_REPOSITORY_SCHEME}, got {self.repo_url!r}"
+            )
 
 
 @dataclass(frozen=True)
@@ -254,7 +282,7 @@ def _entries_in(payload: JsonObject) -> Iterator[ServerRecord | None]:
             yield None
             continue
 
-        if urlparse(repo_url).scheme != ALLOWED_REPOSITORY_SCHEME:
+        if not permits_cloning(repo_url):
             yield None
             continue
 
