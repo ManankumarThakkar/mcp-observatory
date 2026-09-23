@@ -62,6 +62,12 @@ def load_server_index(path: Path) -> list[ServerRecord]:
     A malformed or incomplete line raises with its line number, for the same
     reason the history does: a silently skipped server is a hole in the
     published coverage that nobody can see.
+
+    An index that parses completely and holds no servers is refused too. That
+    is the same failure as a missing file one step over: it produces the empty
+    scan the paragraph above exists to prevent, and the pipeline's collapse
+    guard cannot catch it on a first run, because there is no previous run to
+    be smaller than.
     """
     if not path.exists():
         raise FileNotFoundError(f"no server index at {path}")
@@ -74,6 +80,14 @@ def load_server_index(path: Path) -> list[ServerRecord]:
             try:
                 payload = json.loads(line)
                 records.append(ServerRecord(**{name: payload[name] for name in _FIELDS}))
-            except (json.JSONDecodeError, KeyError, TypeError) as exc:
+            # ValueError covers both a line that is not JSON and a record the
+            # ServerRecord constructor refuses, such as one naming a scheme
+            # the fetcher must never be handed. The second used to escape this
+            # handler and arrive with no line number, which in a file of
+            # twenty-one thousand entries meant reading them to find it.
+            except (ValueError, KeyError, TypeError) as exc:
                 raise ValueError(f"{path} is unreadable at line {number}: {exc}") from exc
+
+    if not records:
+        raise ValueError(f"{path} lists no servers; a crawl that found none is a broken crawl")
     return records
