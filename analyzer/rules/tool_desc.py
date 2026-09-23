@@ -1,11 +1,12 @@
 """TOOL-DESC-INJECTION: instructions planted where the assistant will read them."""
 
+import re
 from collections.abc import Iterator
 
 from tree_sitter import Query, QueryCursor
 
 from analyzer.models import Finding, Location
-from analyzer.parsing.trees import ParsedFile, language_for
+from analyzer.parsing.trees import ParsedFile
 from analyzer.rules.base import FileContext
 
 # Both channels a description travels through to reach the model.
@@ -17,13 +18,24 @@ from analyzer.rules.base import FileContext
 # parameter's description reaches it exactly as a tool's own would. The
 # original plan covered only the first, leaving the bigger half unexamined.
 #
-# A positional description argument to `.tool()` is not supported: zero
-# appeared in those 1,824 strings.
+# `identifier` is in both value sets so a description written as a named
+# constant is resolved rather than skipped. A positional description argument
+# to `.tool()` is not supported: zero appeared in those 1,824 strings.
 DESCRIPTION_QUERY = """
-(pair key: (_) @key value: [(string) (template_string)] @text)
+(pair key: (_) @key value: [(string) (template_string) (identifier)] @text)
 (call_expression
   function: (member_expression property: (property_identifier) @method)
-  arguments: (arguments . [(string) (template_string)] @text)) @call
+  arguments: (arguments . [(string) (template_string) (identifier)] @text) @args)
+"""
+
+# Every `const NAME = "..."` in the file. Hoisting a long description into a
+# constant is how they are normally written, which is exactly the population
+# the length test below targets, so reading only inline literals would miss
+# the cases this rule exists for.
+CONSTANT_QUERY = """
+(variable_declarator
+  name: (identifier) @name
+  value: [(string) (template_string)] @value)
 """
 
 DESCRIBE_METHOD = "describe"
@@ -74,10 +86,9 @@ ANOMALOUS_PHRASES: tuple[str, ...] = (
 # Every entry here is second person or imperative mood. Bare adverbs are
 # deliberately absent: an earlier version included "always " and "never ",
 # and the clean fixture's entirely descriptive "the original file is never
-# modified in place" tripped it. That is the same mistake as the original
-# list's "instead of", made one layer further in - a word that reads like a
-# command in isolation and is ordinary prose in a sentence. "first," and
-# "instead," went for the same reason.
+# modified in place" tripped it - the same mistake as the original list's
+# "instead of", made one layer further in. Removing them took the projected
+# corpus volume from roughly 20,200 findings to 1,825.
 IMPERATIVE_PHRASES: tuple[str, ...] = (
     "you must",
     "you should",
@@ -95,11 +106,22 @@ IMPERATIVE_PHRASES: tuple[str, ...] = (
 # Measured rather than picked: across 1,824 real descriptions the median is 47
 # characters and the 90th percentile 141. A description long enough to carry
 # an instruction and addressed to the reader is the shape worth paying to
-# look at. At 200 the combined filter selects 1.9% of descriptions, roughly
-# 20,200 across the corpus.
+# look at.
 LENGTH_THRESHOLD = 200
 
 MAX_EVIDENCE_CHARS = 300
+
+_ESCAPE = re.compile(r"\\u\{([0-9a-fA-F]{1,6})\}|\\u([0-9a-fA-F]{4})|\\x([0-9a-fA-F]{2})|\\(.)")
+
+_SIMPLE_ESCAPES = {
+    "n": "\n",
+    "t": "\t",
+    "r": "\r",
+    "b": "\b",
+    "f": "\f",
+    "v": "\v",
+    "0": "\0",
+}
 
 
 def reads_as_an_instruction(text: str) -> bool:
@@ -125,15 +147,52 @@ def reads_as_an_instruction(text: str) -> bool:
     )
 
 
+def _decode(text: str) -> str:
+    r"""Resolve the escape sequences a JavaScript string may carry.
+
+    The assistant reads the decoded string, so the rule has to as well.
+    `Ignore\u0020previous` is a space to every JSON Schema consumer and an
+    eight-character literal to a raw source match: left undecoded, one escape
+    sequence defeats the phrase list and the length test at once, and the
+    stored evidence would be the escaped form rather than the text that was
+    actually read.
+    """
+
+    def replace(match: re.Match[str]) -> str:
+        braced, short, hexed, simple = match.groups()
+        for group in (braced, short, hexed):
+            if group is not None:
+                try:
+                    return chr(int(group, 16))
+                except ValueError:
+                    return match.group(0)
+        return _SIMPLE_ESCAPES.get(simple, simple)
+
+    return _ESCAPE.sub(replace, text)
+
+
 def _unquote(raw: str) -> str:
-    """The text inside a string or template literal, without its delimiters."""
+    """The decoded text inside a string or template literal."""
     stripped = raw.strip()
-    for quote in ('"""', "'''", '"', "'", "`"):
-        if stripped.startswith(quote) and stripped.endswith(quote) and len(stripped) >= 2 * len(
-            quote
-        ):
-            return stripped[len(quote) : -len(quote)]
-    return stripped
+    for quote in ('"', "'", "`"):
+        if stripped.startswith(quote) and stripped.endswith(quote) and len(stripped) >= 2:
+            return _decode(stripped[1:-1])
+    return _decode(stripped)
+
+
+def _string_constants(parsed: ParsedFile) -> dict[str, tuple[int, str]]:
+    """Name to (line, decoded text) for every string constant in the file."""
+    cursor = QueryCursor(Query(parsed.grammar, CONSTANT_QUERY))
+    constants: dict[str, tuple[int, str]] = {}
+    for _, capture in cursor.matches(parsed.tree.root_node):
+        names, values = capture.get("name", []), capture.get("value", [])
+        if names and values:
+            node = values[0]
+            constants[parsed.text(names[0])] = (
+                node.start_point[0] + 1,
+                _unquote(parsed.text(node)),
+            )
+    return constants
 
 
 def iter_descriptions(parsed: ParsedFile) -> Iterator[tuple[int, str]]:
@@ -150,12 +209,9 @@ def iter_descriptions(parsed: ParsedFile) -> Iterator[tuple[int, str]]:
     the same pattern, so without the method check every tool name in the
     corpus becomes a finding.
     """
-    grammar = language_for(parsed.language)
-    if grammar is None:
-        return
-
-    cursor = QueryCursor(Query(grammar, DESCRIPTION_QUERY))
-    found: list[tuple[int, str]] = []
+    constants = _string_constants(parsed)
+    cursor = QueryCursor(Query(parsed.grammar, DESCRIPTION_QUERY))
+    found: set[tuple[int, str]] = set()
 
     for _, capture in cursor.matches(parsed.tree.root_node):
         texts = capture.get("text", [])
@@ -170,14 +226,32 @@ def iter_descriptions(parsed: ParsedFile) -> Iterator[tuple[int, str]]:
         elif methods:
             if parsed.text(methods[0]) != DESCRIBE_METHOD:
                 continue
+            # A schema's `describe` takes the text and nothing else. A test
+            # framework's takes a name and a callback, so the argument count
+            # separates them. The scanner already skips test directories, but
+            # a rule that stays correct only because of an unrelated exclusion
+            # breaks the moment that exclusion moves.
+            arguments = capture.get("args", [])
+            if not arguments or len(arguments[0].named_children) != 1:
+                continue
         else:
             continue
 
         node = texts[0]
-        found.append((node.start_point[0] + 1, _unquote(parsed.text(node))))
+        if node.type == "identifier":
+            resolved = constants.get(parsed.text(node))
+            if resolved is None:
+                continue
+            # The declaration's line, because that is where the text lives and
+            # where a maintainer would change it.
+            found.add(resolved)
+        else:
+            found.add((node.start_point[0] + 1, _unquote(parsed.text(node))))
 
-    # Source order, so two scans of one file produce the same findings in the
-    # same order however the query engine walked the tree.
+    # Sorted so two scans of one file produce the same findings in the same
+    # order however the query engine walked the tree. Collected as a set
+    # first, because one constant used by several tools is one description
+    # rather than several.
     yield from sorted(found)
 
 
