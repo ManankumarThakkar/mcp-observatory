@@ -181,3 +181,49 @@ def test_a_missing_server_id_is_refused_as_a_sentence_rather_than_a_traceback(
 
     assert exit_code == EXIT_SCAN_FAILED
     assert "--server-id" in capsys.readouterr().err
+
+
+def test_an_invariant_violation_is_not_reported_as_an_expected_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A guard whose whole value is being loud must not be quietened.
+
+    Finding rejects an unknown severity at construction because an
+    unrecognised one maps to the lowest SARIF level, so a critical finding
+    would publish as a note. That guard, the disclosure gate's timezone check
+    and the history's commit-sha check all raise ValueError, and catching
+    ValueError at the boundary reported every one of them as the same tidy
+    sentence a mistyped flag produces. A defect that exits 2 with a one-line
+    message is a defect nobody will look for.
+    """
+    from analyzer import cli
+
+    def bad_scan(directory: Path, server_id: str, commit_sha: str) -> object:
+        raise ValueError("severity must be one of critical, high, medium, low, info")
+
+    monkeypatch.setattr(cli, "scan_directory", bad_scan)
+
+    with pytest.raises(ValueError, match="severity"):
+        main(["scan", "--path", str(tmp_path), "--server-id", "a/b"])
+
+
+def test_an_index_naming_a_refused_scheme_is_still_a_sentence(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Bad input the caller supplied, so it is reported rather than raised,
+    and it still refuses to scan. Naming the line matters here most of all."""
+    index = tmp_path / "index.jsonl"
+    index.write_text(
+        '{"server_id": "a/one", "repo_url": "https://github.com/a/one", "discovered_via": "registry"}\n'
+        '{"server_id": "b/bad", "repo_url": "file:///home/runner/.ssh", "discovered_via": "registry"}\n',
+        encoding="utf-8",
+    )
+
+    exit_code = main(["scan", "--index", str(index), "--data-dir", str(tmp_path / "d"),
+                      "--cache-dir", str(tmp_path / "c")])
+
+    captured = capsys.readouterr().err
+    assert exit_code == EXIT_SCAN_FAILED
+    assert "line 2" in captured
+    assert "https" in captured
+    assert "Traceback" not in captured
