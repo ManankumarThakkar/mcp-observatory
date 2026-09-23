@@ -24,8 +24,10 @@ from analyzer.crawler.github import (
 from analyzer.crawler.http import FetchFailed, JsonObject, http_fetch
 from analyzer.crawler.index import collapse_to_index, load_server_index, write_server_index
 from analyzer.crawler.registry import RegistryError, crawl_registry
+from analyzer.crawler.sample import sample_index
 from analyzer.fetcher.clone import FetchError, shallow_clone
-from analyzer.pipeline import CollapsedRun, run_pipeline
+from analyzer.orchestrator import CloneFn, ScanFn
+from analyzer.pipeline import CollapsedRun, PipelineResult, run_pipeline
 from analyzer.report.merge import utc_stamp
 from analyzer.scanner import scan_directory
 
@@ -57,6 +59,11 @@ DEFAULT_CORPUS_PATH = Path(".cache/corpus.json")
 # same crawl's output, and it is the one output a later command reads.
 DEFAULT_INDEX_PATH = Path(".cache/server_index.jsonl")
 
+# Fixed, so that "the 2,000-repository sample" names one specific set of
+# repositories a reader can regenerate rather than whichever 2,000 a given
+# night happened to draw. Published wherever a figure drawn from a sample is.
+DEFAULT_SAMPLE_SEED = 20260923
+
 # Published, and committed. Only findings that cleared the disclosure gate
 # reach here.
 DEFAULT_DATA_DIR = Path("data")
@@ -86,6 +93,20 @@ def _build_parser() -> argparse.ArgumentParser:
     # record carries its own. argparse cannot express "required unless", so
     # the check lives in _scan where the combination is known.
     scan.add_argument("--server-id", help="Identifier for the server, e.g. owner/repo.")
+    scan.add_argument(
+        "--sample",
+        type=int,
+        help=(
+            "Scan a reproducible random subset of --index, of this size. "
+            "The subset depends on --seed and the server names and nothing else."
+        ),
+    )
+    scan.add_argument(
+        "--seed",
+        type=int,
+        default=DEFAULT_SAMPLE_SEED,
+        help="Seed for --sample. Publish it beside any figure drawn from the subset.",
+    )
     scan.add_argument(
         "--data-dir", default=str(DEFAULT_DATA_DIR), help="Where published results go."
     )
@@ -188,6 +209,12 @@ def _scan(args: argparse.Namespace) -> int:
     if args.index:
         return _scan_index(args)
 
+    # A subset of one repository is that repository. Ignoring the flag would
+    # scan a single server while the caller believed they had asked for a
+    # sample of many, and the summary line would not say otherwise.
+    if args.sample is not None:
+        raise ValueError("--sample applies to --index; a single repository is not a corpus")
+
     if not args.server_id:
         raise ValueError("--server-id is required when scanning a single server")
 
@@ -223,31 +250,65 @@ def _scan(args: argparse.Namespace) -> int:
     return 0
 
 
-def _scan_index(args: argparse.Namespace) -> int:
-    """Run the whole pipeline over a crawler index.
+def run_index_scan(
+    *,
+    index_path: Path,
+    data_dir: Path,
+    cache_dir: Path,
+    sample: int | None = None,
+    seed: int = DEFAULT_SAMPLE_SEED,
+    clone: CloneFn = shallow_clone,
+    scan: ScanFn = scan_directory,
+    now: Callable[[], datetime] = lambda: datetime.now(UTC),
+) -> PipelineResult:
+    """Run the whole pipeline over a crawler index, or a subset of one.
 
-    Disclosure records are empty here, which means every high and critical
-    finding is withheld. That is the correct default: the gate fails closed,
-    and a record saying a maintainer was notified should come from wherever
-    notifications are actually sent rather than from a flag on this command.
+    Separate from the argparse layer so a test can exercise it without
+    constructing a Namespace, and so the clone and scan functions can be
+    injected. A test that has to build a Namespace ends up asserting against
+    argparse rather than against the pipeline.
+
+    Disclosure records are empty, which means every high and critical finding
+    is withheld. That is the correct default: the gate fails closed, and a
+    record saying a maintainer was notified belongs wherever notifications are
+    actually sent rather than on a flag on this command.
+
+    The temporary working directory is owned here and removed on the way out,
+    on success and on failure alike. Each server's clone lives inside it for
+    as long as the scan of that server takes.
     """
-    records = load_server_index(Path(args.index))
+    records = load_server_index(index_path)
+    if sample is not None:
+        records = sample_index(records, sample, seed=seed)
+
     with tempfile.TemporaryDirectory() as workdir:
-        result = run_pipeline(
+        return run_pipeline(
             records,
-            clone=shallow_clone,
-            scan=scan_directory,
+            clone=clone,
+            scan=scan,
             workdir=Path(workdir),
-            data_dir=Path(args.data_dir),
-            cache_dir=Path(args.cache_dir),
+            data_dir=data_dir,
+            cache_dir=cache_dir,
             disclosure_records={},
-            now=datetime.now(UTC),
+            now=now(),
             tool_version=__version__,
         )
 
+
+def _scan_index(args: argparse.Namespace) -> int:
+    """Report what one index scan did, on stderr, as a single line."""
+    result = run_index_scan(
+        index_path=Path(args.index),
+        data_dir=Path(args.data_dir),
+        cache_dir=Path(args.cache_dir),
+        sample=args.sample,
+        seed=args.seed,
+    )
+
+    drawn = f" (sample of {args.sample}, seed {args.seed})" if args.sample else ""
     print(
         f"{result.scanned} scanned, {result.skipped} skipped, {result.failed} failed; "
-        f"{result.published} published, {result.withheld} withheld",
+        f"{result.published} published, {result.withheld} withheld{drawn}",
         file=sys.stderr,
     )
     return 0
@@ -302,6 +363,10 @@ def main(argv: list[str] | None = None) -> int:
     except (
         CollapsedRun,
         FetchError,
+        # A refused flag combination, a zero sample, a missing --server-id, an
+        # index that lists no servers. Each is the caller being told what to
+        # fix, and each arrived as a traceback until this was added.
+        ValueError,
         FetchFailed,
         GitHubSearchError,
         RegistryError,

@@ -124,3 +124,42 @@ def test_one_index_entry_per_repository_however_many_names_claim_it() -> None:
         ("a/first", "https://github.com/shared/repo", "registry"),
         ("b/solo", "https://github.com/solo/repo", "code-search"),
     ]
+
+
+def test_a_refused_url_deep_in_the_index_names_the_line_it_is_on(tmp_path: Path) -> None:
+    """The scheme check refuses the record, but it refused it anonymously.
+
+    Every other failure in this loader reports its line number, because
+    finding one bad entry in twenty-one thousand otherwise means reading them.
+    The https guard raises from the record's own constructor, which sits
+    outside the handler that adds the line number, so it was the one failure
+    that told you nothing about where it was.
+    """
+    path = tmp_path / "server_index.jsonl"
+    path.write_text(
+        '{"server_id": "a/one", "repo_url": "https://github.com/a/one", "discovered_via": "registry"}\n'
+        '{"server_id": "b/two", "repo_url": "https://github.com/b/two", "discovered_via": "registry"}\n'
+        '{"server_id": "c/bad", "repo_url": "file:///home/runner/.ssh", "discovered_via": "registry"}\n',
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="line 3") as caught:
+        load_server_index(path)
+
+    # Still says what was wrong, not only where.
+    assert "https" in str(caught.value)
+
+
+def test_an_index_with_no_records_is_refused(tmp_path: Path) -> None:
+    """An empty file is the same failure as a missing one, one step over.
+
+    A missing index already raises, because an empty scan and a mistyped path
+    look identical downstream. A file that exists and holds nothing produces
+    exactly that empty scan, and the collapse guard cannot catch it on a first
+    run because there is no previous run to compare against.
+    """
+    path = tmp_path / "server_index.jsonl"
+    path.write_text("", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="no servers"):
+        load_server_index(path)
