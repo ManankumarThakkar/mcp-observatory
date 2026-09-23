@@ -4,6 +4,7 @@ import hashlib
 from collections.abc import Sequence
 
 from analyzer.crawler.registry import ServerRecord
+from analyzer.errors import InputError
 
 
 def _draw_key(seed: int, record: ServerRecord) -> tuple[str, str, str]:
@@ -48,9 +49,9 @@ def sample_index(
     `build_corpus` refuses for the same reason.
     """
     if size <= 0:
-        raise ValueError(f"size must be positive, got {size}")
+        raise InputError(f"size must be positive, got {size}")
     if not records:
-        raise ValueError(
+        raise InputError(
             "cannot sample an empty index; an index with no servers is a broken "
             "crawl rather than an ecosystem with nothing in it"
         )

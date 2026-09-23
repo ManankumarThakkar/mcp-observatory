@@ -7,6 +7,7 @@ from pathlib import Path
 
 from analyzer.crawler.corpus import build_corpus
 from analyzer.crawler.registry import ServerRecord
+from analyzer.errors import InputError
 
 _FIELDS = tuple(field.name for field in fields(ServerRecord))
 
@@ -86,8 +87,8 @@ def load_server_index(path: Path) -> list[ServerRecord]:
             # handler and arrive with no line number, which in a file of
             # twenty-one thousand entries meant reading them to find it.
             except (ValueError, KeyError, TypeError) as exc:
-                raise ValueError(f"{path} is unreadable at line {number}: {exc}") from exc
+                raise InputError(f"{path} is unreadable at line {number}: {exc}") from exc
 
     if not records:
-        raise ValueError(f"{path} lists no servers; a crawl that found none is a broken crawl")
+        raise InputError(f"{path} lists no servers; a crawl that found none is a broken crawl")
     return records

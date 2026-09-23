@@ -25,6 +25,7 @@ from analyzer.crawler.http import FetchFailed, JsonObject, http_fetch
 from analyzer.crawler.index import collapse_to_index, load_server_index, write_server_index
 from analyzer.crawler.registry import RegistryError, crawl_registry
 from analyzer.crawler.sample import sample_index
+from analyzer.errors import InputError
 from analyzer.fetcher.clone import FetchError, shallow_clone
 from analyzer.orchestrator import CloneFn, ScanFn
 from analyzer.pipeline import CollapsedRun, PipelineResult, run_pipeline
@@ -213,10 +214,10 @@ def _scan(args: argparse.Namespace) -> int:
     # scan a single server while the caller believed they had asked for a
     # sample of many, and the summary line would not say otherwise.
     if args.sample is not None:
-        raise ValueError("--sample applies to --index; a single repository is not a corpus")
+        raise InputError("--sample applies to --index; a single repository is not a corpus")
 
     if not args.server_id:
-        raise ValueError("--server-id is required when scanning a single server")
+        raise InputError("--server-id is required when scanning a single server")
 
     if args.path:
         root = Path(args.path)
@@ -364,9 +365,15 @@ def main(argv: list[str] | None = None) -> int:
         CollapsedRun,
         FetchError,
         # A refused flag combination, a zero sample, a missing --server-id, an
-        # index that lists no servers. Each is the caller being told what to
-        # fix, and each arrived as a traceback until this was added.
-        ValueError,
+        # index that lists no servers or names a scheme the fetcher must never
+        # be handed. Each is the caller being told what to fix.
+        #
+        # InputError and not ValueError. Catching ValueError here also caught
+        # every invariant this codebase guards - an unknown severity, a naive
+        # datetime in the disclosure window, a placeholder commit sha - and
+        # printed each as the same tidy line as a mistyped flag. Those guards
+        # are worth having only while they are loud.
+        InputError,
         FetchFailed,
         GitHubSearchError,
         RegistryError,
