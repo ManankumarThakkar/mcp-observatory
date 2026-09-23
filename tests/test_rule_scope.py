@@ -168,3 +168,46 @@ def test_the_vulnerable_fixture_is_caught_in_full() -> None:
 
 def test_the_clean_fixture_produces_nothing() -> None:
     assert _analyze(_fixture("clean/scope_narrow_server.ts")) == []
+
+
+def test_narrowing_the_home_directory_by_any_spelling_is_not_flagged() -> None:
+    """The guard must be about combining, not about one function's name.
+
+    `path.join(homedir(), x)` was guarded; concatenation and a ternary were
+    not, so two other ways of writing the correct pattern were reported as
+    the mistake they avoid.
+    """
+    for source in (
+        'const basePath = os.homedir() + "/.notes";\n',
+        'const basePath = flag ? os.homedir() : "/srv/notes";\n',
+        "const basePath = `${os.homedir()}/.notes`;\n",
+    ):
+        assert _analyze(source) == [], source
+
+
+def test_a_scope_held_as_a_class_field_is_found() -> None:
+    """A field is where a server that uses classes keeps its scope."""
+    source = "class Server {\n  private basePath = os.homedir();\n}\n"
+
+    assert len(_analyze(source)) == 1
+
+
+def test_a_wildcard_origin_inside_a_list_is_found() -> None:
+    """A list of allowed origins containing `*` allows everything."""
+    assert len(_analyze('app.use(cors({ origin: ["*"] }));\n')) == 1
+    assert len(_analyze('const c = { allowedOrigins: ["*"] };\n')) == 1
+
+
+def test_a_wildcard_header_written_as_an_object_key_is_found() -> None:
+    source = 'res.writeHead(200, { "Access-Control-Allow-Origin": "*" });\n'
+
+    assert len(_analyze(source)) == 1
+
+
+def test_the_literal_string_true_is_not_a_wildcard_origin() -> None:
+    """`origin: true` reflects every origin. The string "true" is just a string.
+
+    Conflating them reported a header whose value was the word true, and
+    described it in the evidence as `*`, which was not on the line at all.
+    """
+    assert _analyze('res.setHeader("Access-Control-Allow-Origin", "true");\n') == []

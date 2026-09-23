@@ -28,8 +28,18 @@ from analyzer.rules.base import FileContext
 SCOPE_QUERY = """
 (pair key: (_) @key value: (_) @value)
 (variable_declarator name: (identifier) @name value: (_) @init)
+(public_field_definition name: (property_identifier) @name value: (_) @init)
 (call_expression function: (_) @callee arguments: (arguments) @args)
 """
+
+# The only node types worth walking into when resolving a declared scope. An
+# allowlist rather than a list of things to avoid: a list of paths or origins
+# should be read entry by entry, and every other expression combines its parts
+# into something narrower than any of them. An earlier version stopped only at
+# calls, which guarded `path.join(homedir(), x)` while still reporting
+# `homedir() + "/.notes"` and `flag ? homedir() : "/srv"` - two other
+# spellings of the same correct pattern.
+CONTAINER_NODES = frozenset({"array", "object", "pair"})
 
 # Addresses that accept connections from anywhere, rather than from this
 # machine only. An MCP server is normally a local tool driven over stdio; one
@@ -40,9 +50,24 @@ HOST_KEYS = frozenset({"host", "hostname", "address"})
 LISTEN_METHODS = frozenset({"listen", "createServer", "bind"})
 
 # A wildcard here lets any page in the user's browser drive the server.
-CORS_KEYS = frozenset({"origin", "origins", "allowedorigins", "allow_origin"})
+CORS_KEYS = frozenset(
+    {
+        "origin",
+        "origins",
+        "allowedorigins",
+        "allow_origin",
+        # The header spelled as an object key, which `writeHead` takes.
+        "access-control-allow-origin",
+    }
+)
 CORS_HEADER = "access-control-allow-origin"
-EVERY_ORIGIN = frozenset({"*", "true"})
+
+# `*` as a string, or `true` as a boolean, which reflects whatever origin
+# asked. The string "true" is neither: an earlier version conflated them and
+# reported a header whose value was the word true, describing it in the
+# evidence as `*`, which was not on the line at all.
+WILDCARD_ORIGIN = "*"
+REFLECTS_EVERY_ORIGIN = "true"
 
 # Names that mean "this is the extent of what the server will serve". The name
 # check is what makes the value check usable: a literal "/" appears in 38% of
@@ -74,11 +99,38 @@ MAX_EVIDENCE_CHARS = 160
 
 
 def _literal(parsed: ParsedFile, node: Node) -> str | None:
-    """The text of a string literal, or None if this is not one."""
+    """The text of a string literal, or None if this is not one.
+
+    A doubled backslash collapses to one, so a Windows root written `"C:\\"`
+    in source matches the `C:\\` this rule looks for. Without it that entry
+    is unreachable while appearing to be covered.
+    """
     if node.type not in ("string", "template_string"):
         return None
     raw = parsed.text(node).strip()
-    return raw[1:-1] if len(raw) >= 2 else ""
+    inner = raw[1:-1] if len(raw) >= 2 else ""
+    return inner.replace("\\\\", "\\")
+
+
+def _wildcard_origin(parsed: ParsedFile, node: Node) -> bool:
+    """Whether this value allows every origin.
+
+    Walks containers, because a list of allowed origins containing `*` allows
+    everything just as a bare `*` does.
+    """
+    stack = [node]
+    while stack:
+        current = stack.pop()
+        if current.type == REFLECTS_EVERY_ORIGIN:
+            return True
+        literal = _literal(parsed, current)
+        if literal is not None:
+            if literal == WILDCARD_ORIGIN:
+                return True
+            continue
+        if current.type in CONTAINER_NODES:
+            stack.extend(current.named_children)
+    return False
 
 
 def _names_the_home_directory(parsed: ParsedFile, node: Node) -> bool:
@@ -117,9 +169,7 @@ def _scopes_in(parsed: ParsedFile) -> Iterator[tuple[int, str]]:
             literal = _literal(parsed, value)
             if key in HOST_KEYS and literal in EVERY_INTERFACE:
                 found.add((value.start_point[0] + 1, f"listens on {literal}"))
-            elif key in CORS_KEYS and (
-                literal in EVERY_ORIGIN or parsed.text(value) in EVERY_ORIGIN
-            ):
+            elif key in CORS_KEYS and _wildcard_origin(parsed, value):
                 found.add(
                     (value.start_point[0] + 1, f"accepts any origin ({parsed.text(value)})")
                 )
@@ -158,13 +208,13 @@ def _wide_roots(parsed: ParsedFile, value: Node, label: str) -> set[tuple[int, s
                 found.add((current.start_point[0] + 1, f"{label} is {literal!r}"))
             continue
 
-        # Descend into containers, never into a call. `path.join(homedir(),
-        # '.notes')` narrows the home directory to one folder under it, which
-        # is the correct pattern; walking inside would find the bare
+        # Containers only. Every other expression combines its parts into
+        # something narrower: `path.join(homedir(), '.notes')`,
+        # `homedir() + "/.notes"` and `flag ? homedir() : "/srv"` are all the
+        # correct pattern, and walking inside any of them would find the bare
         # `homedir()` and report exactly the code that got it right.
-        if current.type == "call_expression":
-            continue
-        stack.extend(current.named_children)
+        if current.type in CONTAINER_NODES:
+            stack.extend(current.named_children)
     return found
 
 
@@ -193,7 +243,7 @@ def _wide_calls(parsed: ParsedFile, callee: Node, arguments: list[Node]) -> set[
     if (
         len(values) >= 2
         and (values[0] or "").lower() == CORS_HEADER
-        and values[1] in EVERY_ORIGIN
+        and values[1] == WILDCARD_ORIGIN
     ):
         node = arguments[0].named_children[1]
         found.add((node.start_point[0] + 1, "accepts any origin (*)"))
