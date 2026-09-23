@@ -22,7 +22,7 @@ from analyzer.crawler.github import (
     iter_discoveries,
 )
 from analyzer.crawler.http import FetchFailed, JsonObject, http_fetch
-from analyzer.crawler.index import load_server_index
+from analyzer.crawler.index import collapse_to_index, load_server_index, write_server_index
 from analyzer.crawler.registry import RegistryError, crawl_registry
 from analyzer.fetcher.clone import FetchError, shallow_clone
 from analyzer.pipeline import CollapsedRun, run_pipeline
@@ -51,6 +51,11 @@ DEFAULT_SUMMARY_PATH = Path("docs/coverage.md")
 # Not committed. Several megabytes, and a nightly run would produce thousands
 # of diff lines nobody reads. `.cache/` is already ignored.
 DEFAULT_CORPUS_PATH = Path(".cache/corpus.json")
+
+# Not committed, for the same reasons as the corpus: tens of thousands of
+# lines that would churn nightly. It sits beside the corpus because it is the
+# same crawl's output, and it is the one output a later command reads.
+DEFAULT_INDEX_PATH = Path(".cache/server_index.jsonl")
 
 # Published, and committed. Only findings that cleared the disclosure gate
 # reach here.
@@ -100,6 +105,11 @@ def _build_parser() -> argparse.ArgumentParser:
         "--corpus", default=str(DEFAULT_CORPUS_PATH), help="Where to write the full corpus."
     )
     crawl.add_argument(
+        "--index",
+        default=str(DEFAULT_INDEX_PATH),
+        help="Where to write the index the scan reads, one record per repository.",
+    )
+    crawl.add_argument(
         "--with-code-search",
         action="store_true",
         help=(
@@ -117,10 +127,11 @@ def run_crawl(
     now: Callable[[], datetime],
     summary_path: Path,
     corpus_path: Path,
+    index_path: Path,
     search: SearchFn | None = None,
     search_requests: int = DEFAULT_MAX_REQUESTS,
 ) -> Coverage:
-    """Read the whole registry, then write the summary and the corpus.
+    """Read the whole registry, then write the summary, corpus and index.
 
     Nothing is written until the crawl has completed. The summary is a
     published claim, and replacing it with the results of a run that died
@@ -141,6 +152,10 @@ def run_crawl(
     summary_path.parent.mkdir(parents=True, exist_ok=True)
     summary_path.write_text(render_coverage(coverage), encoding="utf-8")
     write_corpus(corpus_path, coverage)
+    # The scan's input, and the only one of the three a later command reads.
+    # Collapsed to one record per repository, because the orchestrator clones
+    # per record and the coverage summary has already reported that saving.
+    write_server_index(index_path, collapse_to_index(crawl.records))
     return coverage
 
 
@@ -258,6 +273,7 @@ def _crawl(args: argparse.Namespace) -> int:
         now=lambda: datetime.now(UTC),
         summary_path=Path(args.summary),
         corpus_path=Path(args.corpus),
+        index_path=Path(args.index),
         search=search,
     )
     corpus = coverage.corpus

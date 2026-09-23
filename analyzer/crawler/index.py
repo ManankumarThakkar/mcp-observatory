@@ -5,9 +5,38 @@ from collections.abc import Iterable
 from dataclasses import asdict, fields
 from pathlib import Path
 
+from analyzer.crawler.corpus import build_corpus
 from analyzer.crawler.registry import ServerRecord
 
 _FIELDS = tuple(field.name for field in fields(ServerRecord))
+
+
+def collapse_to_index(records: Iterable[ServerRecord]) -> list[ServerRecord]:
+    """One record per repository, which is what the scan should be handed.
+
+    The orchestrator clones once per record, so an index written per registry
+    entry would fetch the most-claimed repository 2,332 times and publish its
+    findings as that many distinct vulnerable servers. Collapsing is the whole
+    reason `build_corpus` exists, and the index has to carry it or the saving
+    is reported in the coverage summary and then not taken.
+
+    The grouping is `build_corpus`'s rather than a second copy of it, because
+    two answers to "what is one repository" would eventually differ and the
+    published corpus size would stop describing the scan that ran.
+
+    A shared repository publishes under the lexicographically first name that
+    claims it. The choice is arbitrary but it must be deterministic: a name
+    picked by registry order would move between runs and turn one finding into
+    a new finding whenever the order changed. The other names are kept in the
+    corpus, so nothing is lost, but the published finding names only one of
+    them and the dashboard will need to say so.
+    """
+    records = list(records)
+    by_id = {record.server_id: record for record in records}
+    return [
+        by_id[repository.server_ids[0]]
+        for repository in build_corpus(records).repositories
+    ]
 
 
 def write_server_index(path: Path, records: Iterable[ServerRecord]) -> None:

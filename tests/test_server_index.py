@@ -2,7 +2,11 @@ from pathlib import Path
 
 import pytest
 
-from analyzer.crawler.index import load_server_index, write_server_index
+from analyzer.crawler.index import (
+    collapse_to_index,
+    load_server_index,
+    write_server_index,
+)
 from analyzer.crawler.registry import ServerRecord
 
 
@@ -87,3 +91,36 @@ def test_a_hand_edited_index_cannot_smuggle_a_local_path_past_the_fetcher(
 
     with pytest.raises(ValueError, match="https"):
         load_server_index(path)
+
+
+def test_one_index_entry_per_repository_however_many_names_claim_it() -> None:
+    """The orchestrator clones once per record, so the index must be collapsed.
+
+    2,332 registry names point at a single repository. An index written per
+    registry entry would clone it 2,332 times and publish its findings as that
+    many distinct vulnerable servers, which is the failure `build_corpus`
+    exists to prevent. The grouping is reused rather than rewritten, so the
+    corpus and the index cannot disagree about what a repository is.
+    """
+    records = [
+        ServerRecord(
+            server_id="c/third", repo_url="https://github.com/shared/repo", discovered_via="registry"
+        ),
+        ServerRecord(
+            server_id="a/first", repo_url="https://github.com/shared/repo", discovered_via="registry"
+        ),
+        ServerRecord(
+            server_id="b/solo",
+            repo_url="https://github.com/solo/repo",
+            discovered_via="code-search",
+        ),
+    ]
+
+    index = collapse_to_index(records)
+
+    # Lexicographically first name, so two crawls of one registry agree on
+    # which name a shared repository publishes under.
+    assert [(r.server_id, r.repo_url, r.discovered_via) for r in index] == [
+        ("a/first", "https://github.com/shared/repo", "registry"),
+        ("b/solo", "https://github.com/solo/repo", "code-search"),
+    ]

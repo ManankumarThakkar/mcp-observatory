@@ -6,6 +6,7 @@ import pytest
 
 from analyzer.cli import EXIT_SCAN_FAILED, main, run_crawl
 from analyzer.crawler.http import FetchFailed, JsonObject
+from analyzer.crawler.index import load_server_index
 
 FIXED_NOW = datetime(2026, 9, 21, 4, 5, 6, tzinfo=UTC)
 
@@ -29,6 +30,7 @@ def test_a_crawl_writes_a_summary_and_a_corpus(tmp_path: Path) -> None:
         now=lambda: FIXED_NOW,
         summary_path=summary,
         corpus_path=corpus,
+        index_path=tmp_path / "server_index.jsonl",
     )
 
     assert coverage.entries_seen == 4
@@ -48,6 +50,7 @@ def test_the_timestamp_is_utc_and_has_no_microseconds(tmp_path: Path) -> None:
         now=lambda: datetime(2026, 9, 21, 4, 5, 6, 123456, tzinfo=UTC),
         summary_path=tmp_path / "coverage.md",
         corpus_path=tmp_path / "corpus.json",
+        index_path=tmp_path / "server_index.jsonl",
     )
 
     assert coverage.crawled_at == "2026-09-21T04:05:06Z"
@@ -72,6 +75,7 @@ def test_a_failed_crawl_writes_nothing(tmp_path: Path) -> None:
             now=lambda: FIXED_NOW,
             summary_path=summary,
             corpus_path=tmp_path / "corpus.json",
+            index_path=tmp_path / "server_index.jsonl",
         )
 
     assert summary.read_text(encoding="utf-8") == "# Coverage\n\nprevious good run\n"
@@ -105,6 +109,7 @@ def test_a_crawl_can_include_the_code_search_sample(tmp_path: Path) -> None:
         now=lambda: FIXED_NOW,
         summary_path=tmp_path / "coverage.md",
         corpus_path=tmp_path / "corpus.json",
+        index_path=tmp_path / "server_index.jsonl",
         search=search,
         search_requests=3,
     )
@@ -126,6 +131,7 @@ def test_a_crawl_without_a_search_client_publishes_only_the_census(tmp_path: Pat
         now=lambda: FIXED_NOW,
         summary_path=tmp_path / "coverage.md",
         corpus_path=tmp_path / "corpus.json",
+        index_path=tmp_path / "server_index.jsonl",
     )
 
     assert coverage.sample is None
@@ -195,3 +201,56 @@ def test_a_missing_index_reports_a_sentence_rather_than_a_traceback(
     tmp_path: Path,
 ) -> None:
     assert main(["scan", "--index", str(tmp_path / "absent.jsonl")]) == EXIT_SCAN_FAILED
+
+
+def test_the_crawl_writes_the_index_the_scan_reads(tmp_path: Path) -> None:
+    """Without this the two halves of the pipeline never meet.
+
+    Spec section 6.1 names server_index.jsonl as the crawler's output, and
+    `scan --index` reads exactly that file, but nothing wrote one: the crawl
+    published a coverage summary and a corpus, neither of which the scan can
+    read. The end-to-end command in the README was unreachable from the
+    command that is supposed to feed it.
+
+    One entry per repository rather than per registry entry, so the collapsing
+    the coverage summary reports is the collapsing the scan actually gets.
+    """
+    index = tmp_path / "server_index.jsonl"
+
+    run_crawl(
+        fetch=lambda url: PAGE,
+        now=lambda: FIXED_NOW,
+        summary_path=tmp_path / "coverage.md",
+        corpus_path=tmp_path / "corpus.json",
+        index_path=index,
+    )
+
+    records = load_server_index(index)
+    assert [(r.server_id, r.repo_url) for r in records] == [
+        ("one/a", "https://github.com/shared/repo"),
+        ("three/c", "https://github.com/solo/repo"),
+    ]
+
+
+def test_a_failed_crawl_writes_no_index_either(tmp_path: Path) -> None:
+    """The index is a scan input, so a partial one silently shrinks the scan.
+
+    A half-written index looks exactly like an ecosystem that got smaller, and
+    the collapse guard would then refuse to publish a run that was never the
+    crawl's fault. Nothing is written until the crawl completes.
+    """
+    index = tmp_path / "server_index.jsonl"
+
+    def die(url: str) -> JsonObject:
+        raise FetchFailed("registry unreachable")
+
+    with pytest.raises(FetchFailed):
+        run_crawl(
+            fetch=die,
+            now=lambda: FIXED_NOW,
+            summary_path=tmp_path / "coverage.md",
+            corpus_path=tmp_path / "corpus.json",
+            index_path=index,
+        )
+
+    assert not index.exists()
