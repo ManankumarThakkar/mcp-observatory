@@ -11,6 +11,7 @@ from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 
+from analyzer import __version__
 from analyzer.crawler.coverage import Coverage, Sample, render_coverage, write_corpus
 from analyzer.crawler.github import (
     DEFAULT_MAX_REQUESTS,
@@ -21,8 +22,11 @@ from analyzer.crawler.github import (
     iter_discoveries,
 )
 from analyzer.crawler.http import FetchFailed, JsonObject, http_fetch
+from analyzer.crawler.index import load_server_index
 from analyzer.crawler.registry import RegistryError, crawl_registry
 from analyzer.fetcher.clone import FetchError, shallow_clone
+from analyzer.pipeline import CollapsedRun, run_pipeline
+from analyzer.report.merge import utc_stamp
 from analyzer.scanner import scan_directory
 
 # A directory scanned in place was never cloned, so there is no commit to
@@ -48,6 +52,15 @@ DEFAULT_SUMMARY_PATH = Path("docs/coverage.md")
 # of diff lines nobody reads. `.cache/` is already ignored.
 DEFAULT_CORPUS_PATH = Path(".cache/corpus.json")
 
+# Published, and committed. Only findings that cleared the disclosure gate
+# reach here.
+DEFAULT_DATA_DIR = Path("data")
+
+# The full history, withheld findings included. Gitignored, because this
+# repository is public and a withheld finding written to a public file is a
+# disclosed one.
+DEFAULT_CACHE_DIR = Path(".cache")
+
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
@@ -60,8 +73,21 @@ def _build_parser() -> argparse.ArgumentParser:
     source = scan.add_mutually_exclusive_group(required=True)
     source.add_argument("--path", help="Scan a directory already on disk.")
     source.add_argument("--repo-url", help="Clone a repository read-only, then scan it.")
+    source.add_argument(
+        "--index",
+        help="Scan every server in a crawler index and publish the results.",
+    )
+    # Required for a single server, meaningless for an index, where each
+    # record carries its own. argparse cannot express "required unless", so
+    # the check lives in _scan where the combination is known.
+    scan.add_argument("--server-id", help="Identifier for the server, e.g. owner/repo.")
     scan.add_argument(
-        "--server-id", required=True, help="Identifier for the server, e.g. owner/repo."
+        "--data-dir", default=str(DEFAULT_DATA_DIR), help="Where published results go."
+    )
+    scan.add_argument(
+        "--cache-dir",
+        default=str(DEFAULT_CACHE_DIR),
+        help="Where the full history lives. Never published.",
     )
 
     crawl = subcommands.add_parser(
@@ -107,7 +133,7 @@ def run_crawl(
     """
     crawl = crawl_registry(fetch)
     moment = now()
-    coverage = Coverage.from_crawl(crawl, crawled_at=_stamp(moment))
+    coverage = Coverage.from_crawl(crawl, crawled_at=utc_stamp(moment))
 
     if search is not None:
         coverage = replace(coverage, sample=_search_sample(search, search_requests, moment))
@@ -143,17 +169,13 @@ def _search_sample(search: SearchFn, max_requests: int, moment: datetime) -> Sam
     return Sample(repo_urls=repo_urls, queries=SEARCH_QUERIES, requests_spent=spent)
 
 
-def _stamp(moment: datetime) -> str:
-    """Render an instant as UTC, to the second.
-
-    Microseconds would make a committed document churn on sub-second noise,
-    and a naive local time would make two machines disagree about when the
-    same registry was read.
-    """
-    return moment.astimezone(UTC).replace(microsecond=0).strftime("%Y-%m-%dT%H:%M:%SZ")
-
-
 def _scan(args: argparse.Namespace) -> int:
+    if args.index:
+        return _scan_index(args)
+
+    if not args.server_id:
+        raise ValueError("--server-id is required when scanning a single server")
+
     if args.path:
         root = Path(args.path)
         if not root.is_dir():
@@ -183,6 +205,36 @@ def _scan(args: argparse.Namespace) -> int:
         indent=2,
     )
     sys.stdout.write("\n")
+    return 0
+
+
+def _scan_index(args: argparse.Namespace) -> int:
+    """Run the whole pipeline over a crawler index.
+
+    Disclosure records are empty here, which means every high and critical
+    finding is withheld. That is the correct default: the gate fails closed,
+    and a record saying a maintainer was notified should come from wherever
+    notifications are actually sent rather than from a flag on this command.
+    """
+    records = load_server_index(Path(args.index))
+    with tempfile.TemporaryDirectory() as workdir:
+        result = run_pipeline(
+            records,
+            clone=shallow_clone,
+            scan=scan_directory,
+            workdir=Path(workdir),
+            data_dir=Path(args.data_dir),
+            cache_dir=Path(args.cache_dir),
+            disclosure_records={},
+            now=datetime.now(UTC),
+            tool_version=__version__,
+        )
+
+    print(
+        f"{result.scanned} scanned, {result.skipped} skipped, {result.failed} failed; "
+        f"{result.published} published, {result.withheld} withheld",
+        file=sys.stderr,
+    )
     return 0
 
 
@@ -232,6 +284,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         return _scan(args) if args.command == "scan" else _crawl(args)
     except (
+        CollapsedRun,
         FetchError,
         FetchFailed,
         GitHubSearchError,

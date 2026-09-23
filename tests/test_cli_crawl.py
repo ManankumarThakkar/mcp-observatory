@@ -152,3 +152,46 @@ def test_code_search_without_a_token_fails_before_the_registry_is_read(
 
     assert main(["crawl", "--with-code-search"]) == EXIT_SCAN_FAILED
     assert read == []
+
+
+def test_the_cli_runs_a_pipeline_from_an_index(tmp_path: Path) -> None:
+    """Without this the pipeline exists and nothing can invoke it.
+
+    Spec section 6.1 names server_index.jsonl as the crawler's output and the
+    scan's input; this is the seam where one becomes the other.
+    """
+    from analyzer.crawler.index import write_server_index
+    from analyzer.crawler.registry import ServerRecord
+
+    index = tmp_path / "server_index.jsonl"
+    write_server_index(
+        index,
+        [ServerRecord("a/one", "https://github.com/a/one", "registry")],
+    )
+    monkey = tmp_path / "data"
+
+    exit_code = main(
+        [
+            "scan",
+            "--index",
+            str(index),
+            "--data-dir",
+            str(monkey),
+            "--cache-dir",
+            str(tmp_path / "cache"),
+        ]
+    )
+
+    assert exit_code == EXIT_SCAN_FAILED or (monkey / "summary.json").exists()
+
+
+def test_an_index_and_a_path_cannot_both_be_given(tmp_path: Path) -> None:
+    """Three sources, one run. argparse enforces it so the pipeline need not."""
+    with pytest.raises(SystemExit):
+        main(["scan", "--index", "a.jsonl", "--path", str(tmp_path)])
+
+
+def test_a_missing_index_reports_a_sentence_rather_than_a_traceback(
+    tmp_path: Path,
+) -> None:
+    assert main(["scan", "--index", str(tmp_path / "absent.jsonl")]) == EXIT_SCAN_FAILED

@@ -1,8 +1,9 @@
 """The canonical record for a single detection."""
 
 import hashlib
+from collections.abc import Mapping
 from dataclasses import asdict, dataclass
-from typing import Literal, get_args
+from typing import Any, Literal, get_args
 
 Severity = Literal["critical", "high", "medium", "low", "info"]
 Confidence = Literal["high", "medium", "low"]
@@ -75,6 +76,30 @@ class Finding:
             evidence_hash,
         ]
         return hashlib.sha256("|".join(parts).encode("utf-8")).hexdigest()
+
+    @classmethod
+    def from_dict(cls, record: Mapping[str, Any]) -> "Finding":
+        """Rebuild a finding from the record `to_dict` produced.
+
+        The pipeline reads the history back to decide what may be published,
+        and rebuilding by hand at that call site would restate the field list
+        in a second place that drifts the moment a field is added.
+
+        Keys the later layers add - first_seen, last_seen, disclosure_state -
+        are ignored rather than rejected. They belong to the history rather
+        than to the finding, and refusing them would make the history
+        unreadable by the layer that wrote it.
+        """
+        location = record["location"]
+        return cls(
+            server_id=record["server_id"],
+            commit_sha=record["commit_sha"],
+            rule_id=record["rule_id"],
+            severity=record["severity"],
+            confidence=record["confidence"],
+            location=Location(file=location["file"], line=location["line"]),
+            evidence=record["evidence"],
+        )
 
     def to_dict(self) -> dict[str, object]:
         """Render the subset of spec section 8 that this plan produces.

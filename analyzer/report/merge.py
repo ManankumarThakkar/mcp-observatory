@@ -3,6 +3,7 @@
 import json
 import re
 from collections.abc import Iterable, Sequence
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -11,6 +12,18 @@ from typing import Any
 COMMIT_SHA = re.compile(r"\A[0-9a-fA-F]{40}\Z")
 
 Record = dict[str, Any]
+
+
+def utc_stamp(moment: datetime) -> str:
+    """Render an instant the way every record and document here writes one.
+
+    UTC, to the second. Microseconds would make a committed file churn on
+    sub-second noise, and a naive local time would make two machines disagree
+    about when the same scan ran. Defined once because the coverage document
+    and the findings history must not drift into two formats.
+    """
+    return moment.astimezone(UTC).replace(microsecond=0).strftime("%Y-%m-%dT%H:%M:%SZ")
+
 
 
 def _require_real_commit(record: Record) -> None:
