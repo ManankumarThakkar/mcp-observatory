@@ -206,6 +206,26 @@ methodology, which is the conversation this project wants to be in.
 league table. The benchmark is an invitation, not an attack, and numbers
 produced by us running somebody else's tool would rightly be questioned.
 
+**Amended 2026-09-24, after building the publication boundary.** This decision
+was written as though publishing the labelled corpus were unconstrained. It is
+not. The corpus is sampled from real findings, and spec section 11 withholds
+`high` and `critical` per-server findings for ninety days, so most of the
+sample cannot be published on the day it is labelled. Redaction does not
+resolve it: the entry carries a verbatim window of source, and removing the
+server's name does not remove every route back to it.
+
+So the published benchmark is gated by the same disclosure window as the
+dashboard, and it ships what may be shipped rather than everything.
+Concretely, today that is one rule of five, because `SCOPE-OVERBROAD` is the
+only rule emitting below `high` and no disclosure window has opened - nothing
+in this project sends notifications yet.
+
+The measurement is unaffected: all 300 entries are labelled and every accuracy
+figure is computed over all of them. What narrows is the file other people can
+download, and it widens as windows close. **Maintainer notification is
+therefore a prerequisite for this decision rather than a nicety**, and it is
+on no plan.
+
 ---
 
 ## D9 - Cap the size of any single file the scanner will read
