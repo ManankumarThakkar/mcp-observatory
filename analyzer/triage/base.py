@@ -44,6 +44,29 @@ class Decision:
             raise ValueError(f"cost must not be negative, got {self.cost_usd}")
 
 
+# How a window is shown, to a human labeller and to every adjudicator alike.
+# One definition, because the benchmark's entire claim is that it compares
+# judgement: if the labeller saw the flagged line marked and a model did not,
+# the difference reported would be a difference in presentation.
+FLAGGED_MARKER = "> "
+QUIET_MARKER = "  "
+
+
+def present(entry: Mapping[str, Any]) -> str:
+    """The window with the flagged line marked.
+
+    The marker is not decoration. The window is twenty-five lines and the
+    flagged line is not reliably the middle one, because the capture clamps
+    near the top of a file. Without the mark, the reader - human or model - is
+    being asked which of twenty-five lines is the question.
+    """
+    offset = int(entry["flagged_offset"])
+    return "\n".join(
+        f"{FLAGGED_MARKER if index == offset else QUIET_MARKER}{line}"
+        for index, line in enumerate(str(entry["context"]).splitlines())
+    )
+
+
 class Adjudicator(Protocol):
     """Anything that can judge a finding.
 
