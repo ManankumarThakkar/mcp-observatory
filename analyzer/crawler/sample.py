@@ -1,33 +1,10 @@
 """A reproducible subset of the index, for work that cannot afford all of it."""
 
-import hashlib
 from collections.abc import Sequence
 
 from analyzer.crawler.registry import ServerRecord
 from analyzer.errors import InputError
-
-
-def _draw_key(seed: int, record: ServerRecord) -> tuple[str, str, str]:
-    """Where this record falls in the draw, for this seed.
-
-    A hash rather than `random.sample`. Both are uniform, but only this one is
-    reproducible by somebody who is not running our code: sha256 of
-    "<seed>:<server_id>" is the whole method, so a reader can regenerate the
-    sample in any language, and a future Python whose `random.sample`
-    algorithm differs cannot quietly redefine which repositories the published
-    figures describe. `random.seed` fixes the stream, not the algorithm that
-    consumes it.
-
-    The id and the URL follow as tie-breaks, which makes the order total. Two
-    records sharing a server_id tie on the hash, and Python's sort is stable,
-    so without a tie-break they would be ordered by whichever arrived first -
-    reintroducing exactly the dependence on input order this exists to remove.
-    A duplicate id should not occur, since `collapse_to_index` keys on the
-    repository and registry names are unique, but "should not occur" is not a
-    property the draw needs to rely on.
-    """
-    digest = hashlib.sha256(f"{seed}:{record.server_id}".encode()).hexdigest()
-    return digest, record.server_id, record.repo_url
+from analyzer.sampling import draw
 
 
 def sample_index(
@@ -39,7 +16,14 @@ def sample_index(
     particular it does not depend on the order the records arrive in, which
     comes from the registry's paging and is not guaranteed stable: a draw that
     depended on it would give two machines different samples from the same
-    seed, and neither would have any way to notice.
+    seed, and neither would have any way to notice. The method itself lives in
+    `analyzer.sampling`, shared with the golden set so that the project has
+    one published sampling method rather than two that could drift.
+
+    The repository URL follows the server id as a tie-break, which makes the
+    order total. A duplicate id should not occur, since `collapse_to_index`
+    keys on the repository and registry names are unique, but "should not
+    occur" is not a property the draw needs to rely on.
 
     A size at or above the corpus returns the whole corpus, because asking for
     more than exists describes a smaller corpus rather than a mistake. Zero, a
@@ -56,5 +40,4 @@ def sample_index(
             "crawl rather than an ecosystem with nothing in it"
         )
 
-    ordered = sorted(records, key=lambda record: _draw_key(seed, record))
-    return ordered[:size]
+    return draw(records, size, seed=seed, key=lambda r: (r.server_id, r.repo_url))
