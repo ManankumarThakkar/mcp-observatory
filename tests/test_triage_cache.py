@@ -7,14 +7,16 @@ from analyzer.triage.base import Decision
 from analyzer.triage.cache import MAX_CALLS_PER_RUN, TriageCache, adjudicate, cache_key
 
 
-def _entry(n: int, context: str = "c") -> dict[str, Any]:
+def _entry(n: int, context: str | None = None) -> dict[str, Any]:
+    # A distinct window per entry, because the key is over what the model is
+    # sent: entries sharing a window are the same question by definition, and
+    # a fixture that reused one would make the cache look broken.
     return {
         "entry_id": f"g-{n}",
         "rule_id": "R",
-        "evidence": f"e{n}",
-        "context": context,
+        "context": context if context is not None else f"line {n}\nexec(cmd{n})",
         "language": "typescript",
-        "flagged_offset": 0,
+        "flagged_offset": 1,
     }
 
 
@@ -30,7 +32,9 @@ class _Counting:
 
 
 def test_the_same_finding_in_the_same_code_is_asked_once() -> None:
-    assert cache_key("R", "evidence", "context") == cache_key("R", "evidence", "context")
+    entry = {"rule_id": "R", "language": "typescript", "context": "a", "flagged_offset": 0}
+
+    assert cache_key("arm", entry) == cache_key("arm", dict(entry))
 
 
 def test_identical_evidence_in_different_code_is_a_different_question() -> None:
@@ -39,7 +43,11 @@ def test_identical_evidence_in_different_code_is_a_different_question() -> None:
     give two genuinely different findings one shared verdict - and the window
     is precisely what separates a reachable call from a safe one.
     """
-    assert cache_key("R", "exec(cmd)", "cmd = 'ls'") != cache_key("R", "exec(cmd)", "cmd = req.body.x")
+    base = {"rule_id": "R", "language": "typescript", "flagged_offset": 1}
+
+    assert cache_key("arm", {**base, "context": "cmd = 'ls'\nexec(cmd)"}) != cache_key(
+        "arm", {**base, "context": "cmd = req.body.x\nexec(cmd)"}
+    )
 
 
 def test_the_separator_cannot_be_impersonated_by_the_content() -> None:
@@ -47,7 +55,9 @@ def test_the_separator_cannot_be_impersonated_by_the_content() -> None:
     they were joined raw, a value containing the separator could shift the
     boundary and two different findings would share one cached verdict.
     """
-    assert cache_key("R", "a", "b|c") != cache_key("R", "a|b", "c")
+    base = {"rule_id": "R", "language": "typescript", "flagged_offset": 0}
+
+    assert cache_key("arm", {**base, "context": "a|b"}) != cache_key("arm|b", {**base, "context": "a"})
 
 
 def test_a_cached_verdict_costs_no_call(tmp_path: Path) -> None:
@@ -130,4 +140,76 @@ def test_a_failed_adjudication_is_not_cached(tmp_path: Path) -> None:
     with pytest.raises(RuntimeError):
         adjudicate([_entry(1)], adjudicator=Failing(), cache=cache, max_calls=10)
 
-    assert cache.get(cache_key("R", "e1", "c")) is None
+    assert cache.get(cache_key("failing", _entry(1))) is None
+
+
+class _Fixed:
+    """An arm that always answers the same thing, so a mix-up is visible."""
+
+    def __init__(self, name: str, probability: float) -> None:
+        self.name = name
+        self._probability = probability
+
+    def decide(self, entry: Any) -> Decision:
+        return Decision(probability=self._probability, cost_usd=0.001, latency_ms=1.0)
+
+
+def test_two_arms_do_not_read_each_other_s_answers(tmp_path: Path) -> None:
+    """The benchmark's entire purpose is comparing arms. Without the arm in
+    the key, the second one run would read the first's decisions from the
+    cache and report identical precision - a plausible-looking result with
+    nothing to indicate it was never measured.
+    """
+    cache = TriageCache(tmp_path / "t.jsonl")
+    entries = [_entry(1)]
+
+    first = adjudicate(entries, adjudicator=_Fixed("arm-a", 0.9), cache=cache, max_calls=10)
+    second = adjudicate(entries, adjudicator=_Fixed("arm-b", 0.1), cache=cache, max_calls=10)
+
+    assert first["g-1"] is not None and first["g-1"].probability == 0.9
+    assert second["g-1"] is not None and second["g-1"].probability == 0.1
+
+
+def test_the_same_arm_still_reuses_its_own_answer(tmp_path: Path) -> None:
+    cache = TriageCache(tmp_path / "t.jsonl")
+    counting = _Counting()
+
+    adjudicate([_entry(1)], adjudicator=counting, cache=cache, max_calls=10)
+    adjudicate([_entry(1)], adjudicator=counting, cache=cache, max_calls=10)
+
+    assert counting.calls == 1
+
+
+def test_a_real_golden_entry_can_be_adjudicated(tmp_path: Path) -> None:
+    """The entries the sampler writes carry no `evidence` field, so a key that
+    read one raised KeyError on every real entry. Two components that each
+    worked and did not join up.
+    """
+    entry = {
+        "entry_id": "g-0001",
+        "finding_id": "abc",
+        "rule_id": "R",
+        "severity": "high",
+        "confidence": "low",
+        "language": "typescript",
+        "context": "a\nb\nc",
+        "flagged_offset": 1,
+        "label": None,
+    }
+
+    results = adjudicate(
+        [entry], adjudicator=_Counting(), cache=TriageCache(tmp_path / "t.jsonl"), max_calls=10
+    )
+
+    assert results["g-0001"] is not None
+
+
+def test_the_key_is_over_what_the_model_is_actually_sent(tmp_path: Path) -> None:
+    """Evidence never reaches the model, so keying on it would treat two
+    identical questions as different and pay twice. What varies the answer is
+    the rule, the language and the marked window."""
+    base = {"rule_id": "R", "language": "typescript", "context": "a\nb", "flagged_offset": 0}
+
+    assert cache_key("arm", base) == cache_key("arm", {**base, "evidence": "anything"})
+    assert cache_key("arm", base) != cache_key("arm", {**base, "flagged_offset": 1})
+    assert cache_key("arm", base) != cache_key("arm", {**base, "language": "python"})

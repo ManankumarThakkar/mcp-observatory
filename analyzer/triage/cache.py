@@ -6,7 +6,7 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
-from analyzer.triage.base import Adjudicator, Decision
+from analyzer.triage.base import Adjudicator, Decision, present
 
 # Spec section 12's hard spend guard. Exceeding it stops adjudication, marks
 # the remainder uncertain and completes the run, rather than aborting: a run
@@ -15,23 +15,34 @@ from analyzer.triage.base import Adjudicator, Decision
 MAX_CALLS_PER_RUN = 3_000
 
 
-def cache_key(rule_id: str, evidence: str, context: str) -> str:
-    """One question's identity.
+def cache_key(arm: str, entry: Mapping[str, Any]) -> str:
+    """One question's identity: who is being asked, and exactly what is sent.
+
+    **The arm is part of the key.** Two adjudicators answering the same
+    question is the entire point of the benchmark, so a key without the arm
+    would let the second one run read the first's decisions and report
+    identical precision - a plausible-looking result that was never measured,
+    with nothing to indicate it.
 
     **A deliberate deviation from spec section 6.4**, which keys on
-    `rule_id + evidence`. Since the adjudicator judges from the captured
-    window rather than the evidence line alone, that key would hand two
-    genuinely different findings one shared verdict - and the surrounding code
-    is exactly what distinguishes a reachable call from a safe one.
+    `rule_id + evidence`. Evidence never reaches the model: the state is the
+    rule's question, the language and the marked window. Keying on evidence
+    would treat two identical questions as different and pay twice, while
+    keying on rule and evidence alone would hand two genuinely different
+    windows one shared verdict - and the surrounding code is exactly what
+    distinguishes a reachable call from a safe one. The key is therefore over
+    what is actually sent, which makes it provably right rather than
+    approximately right.
 
-    The free-text parts are hashed before being joined, the same guard
-    `Finding.finding_id` uses. Evidence and context both come from a
-    repository we do not control, so joining them raw would let a value
-    containing the separator impersonate the boundary between fields, and two
-    different questions would collapse to one cached answer.
+    The free-text part is hashed before being joined, the same guard
+    `Finding.finding_id` uses. The window comes from a repository we do not
+    control, so joining it raw would let content containing the separator
+    impersonate a field boundary and collapse two questions into one answer.
     """
-    parts = [hashlib.sha256(part.encode()).hexdigest() for part in (evidence, context)]
-    return hashlib.sha256("|".join([rule_id, *parts]).encode()).hexdigest()
+    window = hashlib.sha256(present(entry).encode()).hexdigest()
+    return hashlib.sha256(
+        "|".join([arm, str(entry["rule_id"]), str(entry["language"]), window]).encode()
+    ).hexdigest()
 
 
 class TriageCache:
@@ -123,7 +134,7 @@ def adjudicate(
     spent = 0
 
     for entry in entries:
-        key = cache_key(str(entry["rule_id"]), str(entry["evidence"]), str(entry["context"]))
+        key = cache_key(adjudicator.name, entry)
         cached = cache.get(key)
         if cached is not None:
             results[str(entry["entry_id"])] = cached

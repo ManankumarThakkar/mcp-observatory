@@ -84,13 +84,15 @@ def post_json(url: str, body: Mapping[str, Any]) -> Mapping[str, Any]:
             return decoded
     except urllib.error.HTTPError as exc:
         if exc.code == 402:
-            # Named rather than surfaced as a bare 402, because a run of three
-            # hundred that stops a third of the way through with "HTTP error"
-            # is a diagnosis somebody has to go and make.
             raise RuntimeError(
                 "the decision model's prepaid balance is empty; top it up before rerunning"
             ) from exc
-        raise
+        # Every other status carries the service's own explanation, and
+        # discarding it turns a five-second diagnosis into a long one. A bare
+        # "HTTP Error 400" cost exactly that once: the cause was an oversized
+        # state, and the body said so.
+        detail = exc.read().decode(errors="replace")[:300]
+        raise RuntimeError(f"the decision model returned HTTP {exc.code}: {detail}") from exc
 
 
 class JevAdjudicator:
