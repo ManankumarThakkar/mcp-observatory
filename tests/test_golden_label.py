@@ -1,0 +1,150 @@
+from typing import Any
+
+import pytest
+
+from evals.golden.label import (
+    LABELS,
+    apply_label,
+    last_labelled,
+    next_unlabelled,
+    progress,
+    render,
+)
+
+ENTRIES: list[dict[str, Any]] = [
+    {"entry_id": "g-0001", "rule_id": "SHELL-EXEC-UNSAFE", "label": "true_positive"},
+    {"entry_id": "g-0002", "rule_id": "SCOPE-OVERBROAD", "label": None},
+    {"entry_id": "g-0003", "rule_id": "SCOPE-OVERBROAD", "label": None},
+]
+
+
+def test_labelling_resumes_where_it_stopped() -> None:
+    """Three hundred judgements is several sittings. A tool that restarts from
+    the top re-asks questions already answered and wastes the scarcest input
+    this project has.
+    """
+    entry = next_unlabelled(ENTRIES)
+
+    assert entry is not None
+    assert entry["entry_id"] == "g-0002"
+
+
+def test_a_fully_labelled_set_has_nothing_left_to_ask() -> None:
+    assert next_unlabelled([{**e, "label": "false_positive"} for e in ENTRIES]) is None
+
+
+def test_applying_a_label_leaves_every_other_entry_alone() -> None:
+    updated = apply_label(ENTRIES, "g-0002", "false_positive")
+
+    assert updated[1]["label"] == "false_positive"
+    assert updated[0]["label"] == "true_positive"
+    assert updated[2]["label"] is None
+
+
+def test_an_unknown_label_is_refused() -> None:
+    """A typo would enter the ground truth silently and then be scored as a
+    disagreement against all three adjudicators, making every one of them look
+    worse for a reason that has nothing to do with any of them.
+    """
+    with pytest.raises(ValueError, match="label"):
+        apply_label(ENTRIES, "g-0002", "probably")
+
+
+def test_unsure_is_a_first_class_answer() -> None:
+    """A finding nobody can decide from the window is a fact about the window.
+    Forcing it into one of the two real buckets puts noise into the ground
+    truth, and every arm is then scored against a coin flip.
+    """
+    assert "unsure" in LABELS
+    assert apply_label(ENTRIES, "g-0002", "unsure")[1]["label"] == "unsure"
+
+
+def test_labelling_an_entry_that_does_not_exist_is_refused() -> None:
+    """Silently doing nothing looks identical to success, and the entry would
+    simply be asked again next session."""
+    with pytest.raises(KeyError, match="g-9999"):
+        apply_label(ENTRIES, "g-9999", "true_positive")
+
+
+def test_the_last_judgement_can_be_found_again_to_undo_it() -> None:
+    """Three hundred single-keystroke decisions will contain a slip, and
+    without undo the only remedy is editing the data file by hand, which is
+    how a ground truth acquires an error nobody can see.
+    """
+    entry = last_labelled(ENTRIES)
+
+    assert entry is not None
+    assert entry["entry_id"] == "g-0001"
+
+
+def test_undo_has_nothing_to_do_on_an_untouched_set() -> None:
+    assert last_labelled([{**e, "label": None} for e in ENTRIES]) is None
+
+
+def test_progress_counts_what_is_done_against_the_whole() -> None:
+    """Labelling without a visible end is labelling somebody abandons."""
+    assert progress(ENTRIES) == (1, 3)
+
+
+RULES = {"SHELL-EXEC-UNSAFE": ("Shell built from tool input", "A shell command is built from a string.")}
+
+ENTRY: dict[str, Any] = {
+    "entry_id": "g-0001",
+    "rule_id": "SHELL-EXEC-UNSAFE",
+    "severity": "critical",
+    "confidence": "low",
+    "server_id": "acme/notes-server",
+    "file": "src/tools/run.ts",
+    "language": "typescript",
+    "context": "const a = 1\nexec(cmd)\nconst b = 2",
+    "flagged_offset": 1,
+    "label": None,
+}
+
+
+def test_the_view_states_the_claim_being_judged() -> None:
+    """The rule's own title and description are the question, not an anchor.
+    Without them the labeller is guessing what they are being asked."""
+    view = render(ENTRY, RULES)
+
+    assert "Shell built from tool input" in view
+    assert "A shell command is built from a string." in view
+
+
+def test_the_view_hides_what_would_anchor_the_judgement() -> None:
+    """Knowing the scanner rated this critical, or that it was already
+    flagged with some confidence, anchors the answer. A ground truth anchored
+    to the thing it is meant to judge is not a ground truth.
+    """
+    view = render(ENTRY, RULES)
+
+    assert "critical" not in view
+    assert "low" not in view
+
+
+def test_the_view_hides_the_server_so_reputation_cannot_decide_it() -> None:
+    """A well-known publisher's name makes a finding feel like a false
+    positive, and an unknown one makes it feel real. Neither is evidence."""
+    view = render(ENTRY, RULES)
+
+    assert "acme" not in view
+    assert "notes-server" not in view
+
+
+def test_the_view_marks_which_line_was_flagged() -> None:
+    """Twenty-five lines with nothing marked asks the labeller to guess the
+    question. The flagged line is not reliably the middle one, because the
+    window clamps near the top of a file.
+    """
+    view = render(ENTRY, RULES)
+    marked = [line for line in view.splitlines() if line.startswith(">")]
+
+    assert len(marked) == 1
+    assert "exec(cmd)" in marked[0]
+
+
+def test_an_entry_naming_a_rule_the_view_does_not_know_is_refused() -> None:
+    """Rendering it without the claim would ask the labeller to judge an
+    unstated question, and they would answer something."""
+    with pytest.raises(KeyError, match="NO-SUCH-RULE"):
+        render({**ENTRY, "rule_id": "NO-SUCH-RULE"}, RULES)
