@@ -1,13 +1,23 @@
 """Draw the hand-labelled sample: per rule, reproducibly, without losing work."""
 
+import argparse
+import json
+import sys
+import tempfile
+from collections import Counter
 from collections.abc import Collection, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
+from analyzer.cli import DEFAULT_SAMPLE_SEED
+from analyzer.crawler.index import load_server_index
+from analyzer.fetcher.clone import shallow_clone
 from analyzer.models import Finding
+from analyzer.orchestrator import CloneFn, ScanFn
 from analyzer.parsing.trees import LANGUAGE_BY_SUFFIX
 from analyzer.sampling import draw
-from evals.golden.context import CONTEXT_LINES
+from analyzer.scanner import scan_directory
+from evals.golden.context import CONTEXT_LINES, capture_for_findings
 
 # Spec section 10 targets 200 to 300 findings overall. Sixty per rule across
 # five rules lands inside that, and sixty is roughly where a proportion's
@@ -143,3 +153,90 @@ def build_entries(
             }
         )
     return entries
+
+
+def draw_golden_set(
+    *,
+    history_path: Path,
+    index_path: Path,
+    entries_path: Path,
+    per_rule: int = PER_RULE_TARGET,
+    seed: int,
+    clone: CloneFn,
+    scan: ScanFn,
+    workdir: Path,
+) -> tuple[list[dict[str, Any]], dict[str, str]]:
+    """Draw the sample, capture each window, and write the labellable entries.
+
+    Reads any existing entries first and passes their finding ids through the
+    draw, so re-running after a later scan tops the set up rather than
+    replacing it. Labelling is hours of a person's time and a re-draw that
+    discarded it would be the most expensive kind of silent failure here.
+    """
+    findings = [
+        Finding.from_dict(json.loads(line))
+        for line in history_path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    existing: list[dict[str, Any]] = []
+    if entries_path.exists():
+        existing = [
+            json.loads(line)
+            for line in entries_path.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+
+    drawn = stratified_sample(
+        findings,
+        per_rule=per_rule,
+        seed=seed,
+        keep={str(entry["finding_id"]) for entry in existing},
+    )
+    repo_urls = {r.server_id: r.repo_url for r in load_server_index(index_path)}
+    captured = capture_for_findings(
+        drawn, repo_urls=repo_urls, clone=clone, scan=scan, workdir=workdir
+    )
+    entries = build_entries(drawn, contexts=captured.contexts, existing=existing)
+
+    entries_path.parent.mkdir(parents=True, exist_ok=True)
+    entries_path.write_text(
+        "".join(json.dumps(entry, sort_keys=True) + "\n" for entry in entries),
+        encoding="utf-8",
+    )
+    return entries, captured.dropped
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--history", type=Path, default=Path(".cache/history.jsonl"))
+    parser.add_argument("--index", type=Path, default=Path(".cache/server_index.jsonl"))
+    parser.add_argument("--entries", type=Path, default=Path(".cache/golden-entries.jsonl"))
+    parser.add_argument("--per-rule", type=int, default=PER_RULE_TARGET)
+    parser.add_argument("--seed", type=int, default=DEFAULT_SAMPLE_SEED)
+    args = parser.parse_args(argv)
+
+    with tempfile.TemporaryDirectory() as workdir:
+        entries, dropped = draw_golden_set(
+            history_path=args.history,
+            index_path=args.index,
+            entries_path=args.entries,
+            per_rule=args.per_rule,
+            seed=args.seed,
+            clone=shallow_clone,
+            scan=scan_directory,
+            workdir=Path(workdir),
+        )
+
+    counts = Counter(entry["rule_id"] for entry in entries)
+    print(f"{len(entries)} entries written to {args.entries}", file=sys.stderr)
+    for rule, n in sorted(counts.items()):
+        print(f"  {rule:24} {n}", file=sys.stderr)
+    if dropped:
+        print(f"{len(dropped)} findings dropped, uncapturable:", file=sys.stderr)
+        for reason, n in Counter(v[:60] for v in dropped.values()).most_common():
+            print(f"  {n:4}  {reason}", file=sys.stderr)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
