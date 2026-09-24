@@ -19,6 +19,10 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0", "ruff>=0.6", "mypy>=1.11"]
+# An extra rather than a core dependency: the scanner must keep running
+# with no model access at all, and spec section 14 names deterministic
+# rules only as the fallback if adjudication does not earn its cost.
+triage = ["anthropic>=0.40"]
 
 [project.scripts]
 mcp-observatory = "analyzer.cli:main"

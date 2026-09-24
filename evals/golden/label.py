@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from analyzer.rules import ALL_RULES
+from analyzer.triage.base import present
 
 # `unsure` is deliberately available. A finding that cannot be decided from
 # the captured window is a fact about the window, and forcing it into one of
@@ -19,10 +20,6 @@ LABELS: tuple[str, ...] = ("true_positive", "false_positive", "unsure")
 # What the labeller presses. Single keystrokes because there are three hundred
 # of them, and `b` because there will be slips.
 KEYS: Mapping[str, str] = {"y": "true_positive", "n": "false_positive", "u": "unsure"}
-
-FLAGGED_MARKER = "> "
-QUIET_MARKER = "  "
-
 
 def next_unlabelled(entries: Sequence[Mapping[str, Any]]) -> Mapping[str, Any] | None:
     """The first entry still waiting for a judgement, or None if there is none."""
@@ -90,11 +87,6 @@ def render(entry: Mapping[str, Any], rules: Mapping[str, tuple[str, str]]) -> st
     line: the window clamps near the top of a file.
     """
     title, description = rules[entry["rule_id"]]
-    offset = int(entry["flagged_offset"])
-    lines = [
-        f"{FLAGGED_MARKER if index == offset else QUIET_MARKER}{line}"
-        for index, line in enumerate(entry["context"].splitlines())
-    ]
     return "\n".join(
         [
             f"[{entry['entry_id']}]  {entry['rule_id']}  ({entry['language']})",
@@ -102,7 +94,9 @@ def render(entry: Mapping[str, Any], rules: Mapping[str, tuple[str, str]]) -> st
             f"  Claim: {title}",
             f"  {description}",
             "",
-            *lines,
+            # Shared with the adjudicators rather than duplicated, so the
+            # human and the models are shown the same window by construction.
+            present(entry),
         ]
     )
 
