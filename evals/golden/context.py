@@ -35,6 +35,22 @@ CONTEXT_LINES = 12
 
 
 @dataclass(frozen=True)
+class EnclosingContext:
+    """A function's source and where the flagged line sits inside it.
+
+    The offset travels with the text because the two are only meaningful
+    together. A function begins at a different line of the file than a window
+    centred on the same finding, so the window's offset points at unrelated
+    code inside it, and a presenter handed the text alone would either guess or
+    search for the line - and a function legitimately repeats a line, so the
+    first match can be the wrong one.
+    """
+
+    text: str
+    flagged_offset: int
+
+
+@dataclass(frozen=True)
 class CaptureResult:
     """The windows captured, and every entry that could not be.
 
@@ -47,7 +63,7 @@ class CaptureResult:
     # The enclosing function, where one exists. Sparse on purpose: a rule the
     # manipulation does not apply to has no entry rather than a duplicate of
     # the window, which would imply an experiment that was not run on it.
-    functions: dict[str, str] = field(default_factory=dict)
+    functions: dict[str, EnclosingContext] = field(default_factory=dict)
     dropped: dict[str, str] = field(default_factory=dict)
 
 
@@ -146,7 +162,9 @@ def capture_for_judgement(
     return text
 
 
-def both_contexts(source: str, line: int, *, suffix: str) -> tuple[str | None, str | None]:
+def both_contexts(
+    source: str, line: int, *, suffix: str
+) -> tuple[str | None, EnclosingContext | None]:
     """The same finding under both judgement conditions.
 
     Captured together from one clone at one commit. Capturing them in separate
@@ -168,7 +186,13 @@ def both_contexts(source: str, line: int, *, suffix: str) -> tuple[str | None, s
     if node is None:
         return narrow, None
     text = parsed.text(node)
-    return narrow, text if len(text) <= MAX_FUNCTION_CHARS else None
+    if len(text) > MAX_FUNCTION_CHARS:
+        return narrow, None
+
+    # Derived from the node's own start row rather than by searching the text
+    # for the line, which would pick the first of several identical lines.
+    offset = line - (node.start_point[0] + 1)
+    return narrow, EnclosingContext(text=text, flagged_offset=offset)
 
 
 def _enclosing_function(root: Node, line: int, *, source: str) -> Node | None:

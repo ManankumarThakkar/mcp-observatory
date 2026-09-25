@@ -72,6 +72,47 @@ def _clip(line: str) -> str:
     return line[:MAX_LINE_CHARS] + TRUNCATION_MARKER
 
 
+# Where each judgement condition keeps its context and its marker offset. A
+# mapping rather than a naming convention, so a condition that is asked for but
+# was never captured fails loudly instead of resolving to a neighbouring field.
+CONTEXT_FIELDS: Mapping[str, tuple[str, str]] = {
+    "window": ("context", "flagged_offset"),
+    "function": ("context_function", "flagged_offset_function"),
+}
+
+
+def as_condition(entry: Mapping[str, Any], condition: str) -> Mapping[str, Any]:
+    """The same entry as seen under one judgement condition.
+
+    The condition is applied by rewriting the entry rather than by giving the
+    presenter a variant, and that is the point. Every consumer downstream - the
+    presenter, the adjudication cache key, each model arm - then receives an
+    ordinary entry and has no way to tell the conditions apart, so a difference
+    in the result must have come from the context. An arm that took a
+    `condition` argument would be an arm that could branch on one, and the
+    comparison would rest on a promise rather than on the shape of the code.
+
+    The cache key follows for free, because it hashes the presented text: the
+    two conditions key differently without anything being told about them.
+
+    An entry with no capture for the requested condition raises. Falling back to
+    the window would record two observations of one context and publish them as a
+    comparison between two, which is the single result this experiment must not
+    produce.
+    """
+    if condition not in CONTEXT_FIELDS:
+        raise ValueError(
+            f"condition must be one of {', '.join(CONTEXT_FIELDS)}, got {condition!r}"
+        )
+    context_field, offset_field = CONTEXT_FIELDS[condition]
+    if entry.get(context_field) is None or entry.get(offset_field) is None:
+        raise KeyError(
+            f"entry has no {condition!r} context: {context_field} and "
+            f"{offset_field} are both required"
+        )
+    return {**entry, "context": entry[context_field], "flagged_offset": entry[offset_field]}
+
+
 def present(entry: Mapping[str, Any]) -> str:
     """The window with the flagged line marked, bounded in size.
 

@@ -17,7 +17,7 @@ from analyzer.orchestrator import CloneFn, ScanFn
 from analyzer.parsing.trees import LANGUAGE_BY_SUFFIX
 from analyzer.sampling import draw
 from analyzer.scanner import scan_directory
-from evals.golden.context import CONTEXT_LINES, capture_for_findings
+from evals.golden.context import CONTEXT_LINES, EnclosingContext, capture_for_findings
 from evals.harness.experiment import suspect_functions
 
 # Spec section 10 targets 200 to 300 findings overall. Sixty per rule across
@@ -117,7 +117,7 @@ def build_entries(
     findings: Sequence[Finding],
     *,
     contexts: Mapping[str, str],
-    functions: Mapping[str, str] | None = None,
+    functions: Mapping[str, EnclosingContext] | None = None,
     existing: Sequence[Mapping[str, Any]],
 ) -> list[dict[str, Any]]:
     """Turn drawn findings into labellable entries, preserving work already done.
@@ -153,6 +153,7 @@ def build_entries(
         context = contexts.get(finding.finding_id)
         if context is None:
             continue
+        enclosing = (functions or {}).get(finding.finding_id)
 
         previous = kept.get(finding.finding_id)
         if previous is None:
@@ -175,9 +176,14 @@ def build_entries(
                 "confidence": finding.confidence,
                 "language": _language(finding.location.file),
                 "context": context,
-                # Absent for a rule a window settles, so the entries file says
-                # which findings the second condition applies to.
-                "context_function": (functions or {}).get(finding.finding_id),
+                # Both absent for a rule a window settles, so the entries file
+                # says which findings the second condition applies to. The
+                # offset travels with the text because a function begins at a
+                # different line of the file than the window does.
+                "context_function": enclosing.text if enclosing else None,
+                "flagged_offset_function": (
+                    enclosing.flagged_offset if enclosing else None
+                ),
                 "flagged_offset": min(finding.location.line - 1, CONTEXT_LINES),
                 "label": label,
                 "observations": carried,

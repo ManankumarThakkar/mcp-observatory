@@ -367,7 +367,7 @@ def test_a_taint_entry_carries_both_contexts_for_the_comparison() -> None:
 
     assert narrow is not None and wide is not None
     assert "userInput" not in narrow, "the narrow window must not reach the signature"
-    assert "function runTool(userInput: string)" in wide
+    assert "function runTool(userInput: string)" in wide.text
 
 
 def test_a_non_taint_entry_has_no_second_condition() -> None:
@@ -411,7 +411,9 @@ def test_the_capture_returns_both_contexts_for_a_taint_finding(tmp_path: Path) -
     assert finding.finding_id in result.contexts
     assert finding.finding_id in result.functions
     assert "userInput" not in result.contexts[finding.finding_id]
-    assert "function runTool(userInput: string)" in result.functions[finding.finding_id]
+    enclosing = result.functions[finding.finding_id]
+    assert "function runTool(userInput: string)" in enclosing.text
+    assert enclosing.text.splitlines()[enclosing.flagged_offset].strip().startswith("return execSync")
 
 
 def test_a_sibling_function_on_the_flagged_line_is_not_mistaken_for_the_enclosing_one() -> None:
@@ -466,3 +468,29 @@ def test_a_handler_occupying_the_whole_flagged_line_is_still_chosen() -> None:
 
     assert captured is not None
     assert captured.strip().startswith("async (args) =>")
+
+
+def test_the_enclosing_context_carries_the_flagged_line_s_position_within_it() -> None:
+    """A context without its own marker offset cannot be presented honestly.
+
+    The window and the function start at different lines of the file, so one
+    offset cannot locate the flagged line in both. Capturing the text alone
+    would leave the presenter to guess, and searching for the line by its text
+    is not a fallback: a function legitimately repeats a line - a bare closing
+    brace, the same call twice - and the first match may be the wrong one.
+    """
+    from evals.golden.context import both_contexts
+
+    source = "\n".join(
+        ["// header"]
+        + ["export function runTool(userInput: string): string {"]
+        + [f"  const noise{n} = {n};" for n in range(5)]
+        + ["  return execSync(`ls ${userInput}`).toString();", "}"]
+    )
+    flagged = source.splitlines().index("  return execSync(`ls ${userInput}`).toString();") + 1
+
+    _, enclosing = both_contexts(source, flagged, suffix=".ts")
+
+    assert enclosing is not None
+    lines = enclosing.text.splitlines()
+    assert lines[enclosing.flagged_offset] == "  return execSync(`ls ${userInput}`).toString();"
