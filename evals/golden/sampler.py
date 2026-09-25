@@ -116,6 +116,7 @@ def build_entries(
     findings: Sequence[Finding],
     *,
     contexts: Mapping[str, str],
+    functions: Mapping[str, str] | None = None,
     existing: Sequence[Mapping[str, Any]],
 ) -> list[dict[str, Any]]:
     """Turn drawn findings into labellable entries, preserving work already done.
@@ -155,9 +156,10 @@ def build_entries(
         previous = kept.get(finding.finding_id)
         if previous is None:
             highest += 1
-            entry_id, label = f"g-{highest:04d}", None
+            entry_id, label, carried = f"g-{highest:04d}", None, None
         else:
             entry_id, label = str(previous["entry_id"]), previous.get("label")
+            carried = previous.get("observations")
 
         entries.append(
             {
@@ -172,8 +174,12 @@ def build_entries(
                 "confidence": finding.confidence,
                 "language": _language(finding.location.file),
                 "context": context,
+                # Absent for a rule a window settles, so the entries file says
+                # which findings the second condition applies to.
+                "context_function": (functions or {}).get(finding.finding_id),
                 "flagged_offset": min(finding.location.line - 1, CONTEXT_LINES),
                 "label": label,
+                "observations": carried,
             }
         )
     return entries
@@ -221,7 +227,9 @@ def draw_golden_set(
     captured = capture_for_findings(
         drawn, repo_urls=repo_urls, clone=clone, scan=scan, workdir=workdir
     )
-    entries = build_entries(drawn, contexts=captured.contexts, existing=existing)
+    entries = build_entries(
+        drawn, contexts=captured.contexts, functions=captured.functions, existing=existing
+    )
 
     entries_path.parent.mkdir(parents=True, exist_ok=True)
     entries_path.write_text(

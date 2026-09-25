@@ -382,3 +382,33 @@ def test_a_non_taint_entry_has_no_second_condition() -> None:
 
     assert narrow is not None
     assert wide is None, "no enclosing function exists in a document"
+
+
+def test_the_capture_returns_both_contexts_for_a_taint_finding(tmp_path: Path) -> None:
+    """Both conditions must reach the entries file, or the experiment cannot be
+    run from it."""
+    source = "\n".join(
+        [f"// filler {n}" for n in range(20)]
+        + ["export function runTool(userInput: string): string {", "  const cmd = `ls ${userInput}`;"]
+        + [f"  const noise{n} = {n};" for n in range(20)]
+        + ["  return execSync(cmd).toString();", "}"]
+    )
+    line = source.splitlines().index("  return execSync(cmd).toString();") + 1
+    finding = Finding(
+        server_id="a/one", commit_sha="a" * 40, rule_id="SHELL-EXEC-UNSAFE",
+        severity="critical", confidence="low",
+        location=Location(file="index.ts", line=line), evidence="execSync(cmd)",
+    )
+
+    result = capture_for_findings(
+        [finding],
+        repo_urls={"a/one": "https://github.com/a/one"},
+        clone=_clone_writing(source),
+        scan=lambda root, server_id, commit_sha: ScanReport(findings=(finding,), skipped=()),
+        workdir=tmp_path,
+    )
+
+    assert finding.finding_id in result.contexts
+    assert finding.finding_id in result.functions
+    assert "userInput" not in result.contexts[finding.finding_id]
+    assert "function runTool(userInput: string)" in result.functions[finding.finding_id]

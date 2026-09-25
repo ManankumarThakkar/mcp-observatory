@@ -44,6 +44,10 @@ class CaptureResult:
     """
 
     contexts: dict[str, str] = field(default_factory=dict)
+    # The enclosing function, where one exists. Sparse on purpose: a rule the
+    # manipulation does not apply to has no entry rather than a duplicate of
+    # the window, which would imply an experiment that was not run on it.
+    functions: dict[str, str] = field(default_factory=dict)
     dropped: dict[str, str] = field(default_factory=dict)
 
 
@@ -271,14 +275,15 @@ def _capture_from(
             result.dropped[finding.finding_id] = f"unreadable: {exc}"
             continue
 
-        captured = capture_for_judgement(
-            source,
-            finding.location.line,
-            suffix=Path(finding.location.file).suffix,
-            enclosing=_NEEDS_FUNCTION.get(finding.rule_id, False),
+        window, enclosing = both_contexts(
+            source, finding.location.line, suffix=Path(finding.location.file).suffix
         )
-        if captured is None:
+        if window is None:
             result.dropped[finding.finding_id] = "line is past the end of the file"
             continue
-        result.contexts[finding.finding_id] = captured
+        result.contexts[finding.finding_id] = window
+        # Only for the rules whose findings a window cannot settle. Carrying it
+        # for the others would offer a second condition that was never tested.
+        if enclosing is not None and _NEEDS_FUNCTION.get(finding.rule_id, False):
+            result.functions[finding.finding_id] = enclosing
 
