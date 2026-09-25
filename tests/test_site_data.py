@@ -25,6 +25,9 @@ def _published(**overrides: object) -> dict[str, object]:
 
 
 SUMMARY = {
+    "corpus": 21492,
+    "sampled": 2000,
+    "sample_seed": 20260923,
     "generated_at": "2026-09-25T01:10:58Z",
     "published_at": "2026-09-25T01:12:00Z",
     "tool_version": "0.1.0",
@@ -58,8 +61,8 @@ def test_repeated_findings_of_one_decision_are_grouped(tmp_path: Path) -> None:
 
     site = build_site_data(_write(tmp_path, rows))
 
-    assert site.findings_total == 16
-    assert site.decisions_total == 1
+    assert site.findings_published == 16
+    assert site.decisions_published == 1
     assert site.groups[0].occurrences == 16
 
 
@@ -68,7 +71,7 @@ def test_the_raw_count_is_kept_beside_the_grouped_one(tmp_path: Path) -> None:
     publishing only one invites the reader to assume the other."""
     site = build_site_data(_write(tmp_path, [_published(), _published(finding_id="f2", location={"file": "a.ts", "line": 2})]))
 
-    assert (site.findings_total, site.decisions_total) == (2, 1)
+    assert (site.findings_published, site.decisions_published) == (2, 1)
 
 
 def test_different_evidence_on_one_server_is_a_different_decision(tmp_path: Path) -> None:
@@ -76,7 +79,7 @@ def test_different_evidence_on_one_server_is_a_different_decision(tmp_path: Path
     filesystem root, which are two separate things to fix."""
     rows = [_published(), _published(finding_id="f2", evidence="listens on 0.0.0.0")]
 
-    assert build_site_data(_write(tmp_path, rows)).decisions_total == 2
+    assert build_site_data(_write(tmp_path, rows)).decisions_published == 2
 
 
 def test_coverage_is_read_from_the_rules_rather_than_restated(tmp_path: Path) -> None:
@@ -161,3 +164,50 @@ def test_the_written_file_is_deterministic(tmp_path: Path) -> None:
 
     assert out.read_text() == first
     assert json.loads(first)["groups"][0]["server_id"] == "acme/one"
+
+
+def test_the_page_gets_the_denominator_and_the_sampling_method(tmp_path: Path) -> None:
+    """1,643 scanned of 21,492 known repositories is 7.6% of the corpus.
+    A page stating the numerator alone is misleading by omission, and it is the
+    first thing a reviewer asks about.
+    """
+    summary = {**SUMMARY, "corpus": 21492, "sampled": 2000, "sample_seed": 20260923}
+
+    site = build_site_data(_write(tmp_path, [_published()], summary))
+
+    assert site.corpus == 21492
+    assert site.sampled == 2000
+    assert site.sample_seed == 20260923
+
+
+def test_a_full_corpus_scan_reports_no_sample(tmp_path: Path) -> None:
+    summary = {**SUMMARY, "corpus": 21492, "sampled": None, "sample_seed": None}
+
+    site = build_site_data(_write(tmp_path, [_published()], summary))
+
+    assert site.sampled is None
+
+
+def test_a_summary_without_a_denominator_is_refused(tmp_path: Path) -> None:
+    """Older summaries predate the field. Defaulting to zero would render as
+    "1,643 of 0", and defaulting to the scanned count would claim full
+    coverage of whatever happened to be scanned - the most flattering reading
+    available.
+    """
+    without = {k: v for k, v in SUMMARY.items() if k != "corpus"}
+
+    with pytest.raises(ValueError, match="corpus"):
+        build_site_data(_write(tmp_path, [_published()], without))
+
+
+def test_the_total_found_is_carried_beside_the_total_published(tmp_path: Path) -> None:
+    """322 published and 963 withheld means 1,285 were found. A page showing
+    only the published figure reports a quarter of what the scanner found and
+    reads as a much cleaner ecosystem than the one measured, which is the one
+    direction this project must not be wrong in.
+    """
+    site = build_site_data(_write(tmp_path, [_published()]))
+
+    assert site.findings_published == 1
+    assert site.withheld == 963
+    assert site.findings_found == 964

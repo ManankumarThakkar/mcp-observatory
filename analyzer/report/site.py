@@ -65,11 +65,21 @@ class SiteData:
     generated_at: str
     published_at: str
     tool_version: str
+    # The denominator, and how the scanned set was drawn from it. 1,643 of
+    # 21,492 is 7.6% of the corpus, and a page stating only the numerator is
+    # misleading by omission.
+    corpus: int
+    sampled: int | None
+    sample_seed: int | None
     scanned: int
     skipped: int
     failed: int
-    findings_total: int
-    decisions_total: int
+    # Named rather than left as a "total": 322 published and 963 withheld means
+    # 1,285 found, and a page showing only the published figure reads as a much
+    # cleaner ecosystem than the one measured.
+    findings_found: int
+    findings_published: int
+    decisions_published: int
     servers_affected: int
     withheld: int
     by_severity: dict[str, int]
@@ -111,6 +121,15 @@ def build_site_data(data_dir: Path) -> SiteData:
             "findings with no denominator"
         )
     summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    if "corpus" not in summary:
+        # Refused rather than defaulted. Zero renders as "1,643 of 0", and
+        # falling back to the scanned count claims full coverage of whatever
+        # happened to be scanned, which is the most flattering reading
+        # available and the least true.
+        raise ValueError(
+            f"{summary_path} states no corpus size, so coverage has no denominator; "
+            "rescan to record it"
+        )
     rows = _load_jsonl(data_dir / FINDINGS_FILE)
 
     # One decision per server, rule and evidence. Grouping by server and rule
@@ -153,17 +172,22 @@ def build_site_data(data_dir: Path) -> SiteData:
     )
 
     disclosure = summary.get("disclosure", {})
+    withheld = int(disclosure.get("withheld", 0)) + int(disclosure.get("opted_out", 0))
     return SiteData(
         generated_at=str(summary.get("generated_at", "")),
         published_at=str(summary.get("published_at", summary.get("generated_at", ""))),
         tool_version=str(summary.get("tool_version", "")),
+        corpus=int(summary["corpus"]),
+        sampled=summary.get("sampled"),
+        sample_seed=summary.get("sample_seed"),
         scanned=int(summary.get("scanned", 0)),
         skipped=int(summary.get("skipped", 0)),
         failed=int(summary.get("failed", 0)),
-        findings_total=len(rows),
-        decisions_total=len(groups),
+        findings_published=len(rows),
+        decisions_published=len(groups),
+        findings_found=len(rows) + withheld,
         servers_affected=len({row["server_id"] for row in rows}),
-        withheld=int(disclosure.get("withheld", 0)) + int(disclosure.get("opted_out", 0)),
+        withheld=withheld,
         by_severity=dict(sorted(Counter(str(row["severity"]) for row in rows).items())),
         rules=rules,
         coverage=tuple(
