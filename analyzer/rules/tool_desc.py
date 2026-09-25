@@ -3,7 +3,7 @@
 import re
 from collections.abc import Iterator
 
-from tree_sitter import Query, QueryCursor
+from tree_sitter import Node, Query, QueryCursor
 
 from analyzer.models import Finding, Location
 from analyzer.parsing.trees import ParsedFile
@@ -39,6 +39,27 @@ CONSTANT_QUERY = """
 """
 
 DESCRIBE_METHOD = "describe"
+
+# Keys that mark the object carrying a `description` as a tool rather than as
+# some other record that happens to describe itself. A tool declares the shape
+# of its input or the code that runs it; a catalogue entry declares a price.
+#
+# Found by labelling real output: the rule matched every object with a
+# `description` key, so a marketplace listing of paid services became findings.
+# `name` and `title` are deliberately absent - a product has both.
+TOOL_MARKERS = frozenset(
+    {
+        "inputschema",
+        "input_schema",
+        "outputschema",
+        "output_schema",
+        "parameters",
+        "handler",
+        "execute",
+        "annotations",
+        "callback",
+    }
+)
 DESCRIPTION_KEYS = frozenset({"description", '"description"', "'description'"})
 
 # Phrasing with no innocent reading in a description of a tool. Narrow on
@@ -61,7 +82,16 @@ ANOMALOUS_PHRASES: tuple[str, ...] = (
     "disregard all previous",
     "disregard the above",
     "disregard your",
-    "system prompt",
+    # "system prompt" alone was here and was wrong. The list's own criterion is
+    # phrasing with no innocent reading, and the bare noun has one: a tool that
+    # sets, stores or injects a system prompt names it accurately. Found by
+    # labelling real output, where it flagged a project tool whose description
+    # truthfully said projects carry "an optional system prompt". The dangerous
+    # forms are instructions *about* the prompt, so those are listed instead.
+    "your system prompt",
+    "the system prompt",
+    "reveal your system",
+    "print your system",
     "<important>",
     "</important>",
     "<system>",
@@ -180,6 +210,44 @@ def _unquote(raw: str) -> str:
     return _decode(stripped)
 
 
+def _declares_a_tool(parsed: ParsedFile, key_node: Node) -> bool:
+    """Whether the object holding this `description` is a tool definition.
+
+    A description is only an instruction channel if a model reads it while
+    choosing a tool. An object that merely has a description - a catalogue
+    entry, a config block, a product listing - is read by nobody, and treating
+    it as tool metadata is how a marketplace of paid services became findings.
+
+    The test is a sibling key declaring the tool's input shape or its code,
+    because that is what makes an object a tool. A description passed directly
+    to a registration call has no enclosing object and is accepted: the call
+    itself is the declaration.
+    """
+    pair = key_node.parent
+    enclosing = pair.parent if pair is not None else None
+    if enclosing is None or enclosing.type != "object":
+        # Not inside an object literal at all: a description passed directly to
+        # a call, where the call is the declaration.
+        return True
+
+    # An object handed to a call is a tool being registered - `registerTool("x",
+    # { description }, handler)` declares the tool by the call, not by a sibling
+    # key. An object sitting in an array or assigned to a name is not: that is
+    # where the catalogue of paid services lived.
+    if enclosing.parent is not None and enclosing.parent.type == "arguments":
+        return True
+
+    for child in enclosing.named_children:
+        if child.type != "pair":
+            continue
+        sibling = child.child_by_field_name("key")
+        if sibling is None:
+            continue
+        if parsed.text(sibling).strip("\"'").lower() in TOOL_MARKERS:
+            return True
+    return False
+
+
 def _string_constants(parsed: ParsedFile) -> dict[str, tuple[int, str]]:
     """Name to (line, decoded text) for every string constant in the file."""
     cursor = QueryCursor(Query(parsed.grammar, CONSTANT_QUERY))
@@ -222,6 +290,8 @@ def iter_descriptions(parsed: ParsedFile) -> Iterator[tuple[int, str]]:
         methods = capture.get("method", [])
         if keys:
             if parsed.text(keys[0]) not in DESCRIPTION_KEYS:
+                continue
+            if not _declares_a_tool(parsed, keys[0]):
                 continue
         elif methods:
             if parsed.text(methods[0]) != DESCRIBE_METHOD:

@@ -18,6 +18,13 @@ from analyzer.triage.base import present
 # side is too narrow, and that is a measurement rather than an inconvenience.
 LABELS: tuple[str, ...] = ("true_positive", "false_positive", "unsure")
 
+# Who made a judgement. A mixed set is the intended end state - a model labels
+# the whole corpus, a person validates a random subset - and without provenance
+# the two become indistinguishable the moment they are written to one file.
+# A closed set rather than free text, because provenance nobody can filter on
+# is not provenance.
+LABELLERS: tuple[str, ...] = ("human", "model")
+
 # What the labeller presses. Single keystrokes because there are three hundred
 # of them, and `b` because there will be slips.
 KEYS: Mapping[str, str] = {"y": "true_positive", "n": "false_positive", "u": "unsure"}
@@ -46,9 +53,21 @@ def progress(entries: Sequence[Mapping[str, Any]]) -> tuple[int, int]:
 
 
 def apply_label(
-    entries: Sequence[Mapping[str, Any]], entry_id: str, label: str | None
+    entries: Sequence[Mapping[str, Any]],
+    entry_id: str,
+    label: str | None,
+    *,
+    reason: str = "",
+    by: str = "human",
 ) -> list[dict[str, Any]]:
     """Return the entries with one judgement recorded, or taken back.
+
+    A model must give a reason; a person need not. The asymmetry is deliberate.
+    A person pressing one key has already spent the attention that makes the
+    judgement worth something, while a model can produce a confident answer for
+    free - so the cost of an unexamined one is reimposed by requiring it to
+    write down why. It also makes the label auditable: a reader can disagree
+    with one entry rather than with the corpus.
 
     Refuses an unknown label rather than storing it. A typo would enter the
     ground truth silently and then be scored as a disagreement against all
@@ -60,10 +79,20 @@ def apply_label(
     """
     if label is not None and label not in LABELS:
         raise ValueError(f"label must be one of {', '.join(LABELS)}, got {label!r}")
+    if by not in LABELLERS:
+        raise ValueError(f"labeller must be one of {', '.join(LABELLERS)}, got {by!r}")
+    if label is not None and by == "model" and not reason.strip():
+        raise ValueError("a model label needs a reason, so the judgement can be audited")
     if not any(entry["entry_id"] == entry_id for entry in entries):
         raise KeyError(f"no entry {entry_id}")
+
+    def relabel(entry: Mapping[str, Any]) -> dict[str, Any]:
+        if label is None:
+            return {**entry, "label": None, "reason": "", "labelled_by": None}
+        return {**entry, "label": label, "reason": reason, "labelled_by": by}
+
     return [
-        {**entry, "label": label} if entry["entry_id"] == entry_id else dict(entry)
+        relabel(entry) if entry["entry_id"] == entry_id else dict(entry)
         for entry in entries
     ]
 

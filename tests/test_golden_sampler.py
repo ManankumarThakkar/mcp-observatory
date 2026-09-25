@@ -183,3 +183,42 @@ def test_an_existing_entry_whose_finding_is_gone_is_not_resurrected() -> None:
     entries = build_entries([finding], contexts={finding.finding_id: "x"}, existing=existing)
 
     assert [e["finding_id"] for e in entries] == [finding.finding_id]
+
+
+def test_the_draw_only_offers_findings_the_scanner_still_produces() -> None:
+    """The history is cumulative by design - a finding absent from one run is
+    kept, because a server we could not check is not a server that got fixed.
+    That is right for a trend and wrong for a golden set.
+
+    Measured after a rule fix: 175 of 602 TOOL-DESC findings in the history were
+    no longer produced. Drawing 60 from that would pick about 17 the capture
+    then refuses, so the set comes up short of its per-rule target silently, and
+    the shortfall concentrates in whichever rule was most recently corrected.
+    """
+    from evals.golden.sampler import live_findings
+
+    rows = [
+        {"finding_id": "a", "rule_id": "R", "last_seen": "2026-09-25T15:00:00Z"},
+        {"finding_id": "b", "rule_id": "R", "last_seen": "2026-09-25T15:00:00Z"},
+        {"finding_id": "c", "rule_id": "R", "last_seen": "2026-09-24T09:00:00Z"},
+    ]
+
+    assert [r["finding_id"] for r in live_findings(rows)] == ["a", "b"]
+
+
+def test_an_empty_history_yields_nothing_rather_than_raising() -> None:
+    """A first run has no history, and failing there would mean the set can
+    never be drawn a first time."""
+    from evals.golden.sampler import live_findings
+
+    assert live_findings([]) == []
+
+
+def test_a_history_from_a_single_run_is_entirely_live() -> None:
+    """Nothing is stale when there has only ever been one scan, and a filter
+    that dropped everything would be worse than no filter."""
+    from evals.golden.sampler import live_findings
+
+    rows = [{"finding_id": str(n), "rule_id": "R", "last_seen": "2026-09-25T15:00:00Z"} for n in range(3)]
+
+    assert len(live_findings(rows)) == 3

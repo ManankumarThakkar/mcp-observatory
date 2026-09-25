@@ -190,3 +190,45 @@ def test_a_missing_entries_file_says_to_draw_the_set_first(tmp_path: Path) -> No
 
     with pytest.raises(FileNotFoundError, match="draw the golden set"):
         main(["--path", str(tmp_path / "absent.jsonl")])
+
+
+def test_a_label_records_who_made_it_and_why() -> None:
+    """Ground truth that cannot be audited is ground truth that must be taken
+    on trust, which is exactly what this project declines to ask of readers
+    elsewhere. A reason makes a specific label disagreeable; a labeller makes
+    the provenance of a mixed set recoverable.
+    """
+    updated = apply_label(
+        ENTRIES, "g-0002", "false_positive", reason="header is dead code, nothing listens", by="model"
+    )
+
+    assert updated[1]["label"] == "false_positive"
+    assert updated[1]["reason"] == "header is dead code, nothing listens"
+    assert updated[1]["labelled_by"] == "model"
+
+
+def test_a_human_label_supersedes_a_model_label_for_the_same_entry() -> None:
+    """The set is meant to be labelled by a model and then validated by a
+    person. If a human judgement did not win, validation would be decorative.
+    """
+    seeded = apply_label(ENTRIES, "g-0002", "true_positive", reason="reachable", by="model")
+
+    validated = apply_label(seeded, "g-0002", "false_positive", reason="input is fixed", by="human")
+
+    assert validated[1]["label"] == "false_positive"
+    assert validated[1]["labelled_by"] == "human"
+
+
+def test_a_label_without_a_reason_is_refused_for_a_model() -> None:
+    """A model can produce a confident answer for free, so the cost of an
+    unexamined one has to be reimposed deliberately. A human pressing a key is
+    already making a judgement; a model writing a reason is the equivalent.
+    """
+    with pytest.raises(ValueError, match="reason"):
+        apply_label(ENTRIES, "g-0002", "true_positive", by="model")
+
+
+def test_an_unknown_labeller_is_refused() -> None:
+    """Provenance with a free-text field is provenance nobody can filter on."""
+    with pytest.raises(ValueError, match="labeller"):
+        apply_label(ENTRIES, "g-0002", "true_positive", reason="x", by="committee")
