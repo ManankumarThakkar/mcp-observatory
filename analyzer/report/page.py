@@ -2,6 +2,7 @@
 
 from html import escape
 from pathlib import Path
+from urllib.parse import urlparse
 
 from analyzer.report.site import Decision, SiteData
 
@@ -274,9 +275,39 @@ def _slugs(site: SiteData) -> dict[str, str]:
     return slugs
 
 
+# The only schemes this page will put in an href. An allowlist, because the
+# alternative is enumerating what a browser will execute and that list is not
+# ours to keep current.
+LINKABLE_SCHEMES = frozenset({"http", "https"})
+
+
+def linkable(url: str) -> bool:
+    """Whether this URL is safe to render as a link.
+
+    Escaping is not sufficient and that is the point. `escape(url, quote=True)`
+    prevents an attribute break-out, and `javascript:alert(1)` needs no quotes:
+    it is a valid href value. A javascript: href in a published page is stored
+    XSS on a public site.
+
+    The URL arrives from `data/servers.json`, read into a plain dict, so
+    `ServerRecord`'s https guarantee stops at the file boundary exactly as the
+    index loader's did before it was fixed. This is the last check before public
+    HTML, so it validates rather than trusting what wrote the file.
+
+    Leading whitespace is stripped before the scheme is read, because a browser
+    ignores it and `urlparse` does not - "  javascript:alert(1)" parses as a
+    relative path with no scheme and would otherwise pass.
+    """
+    parsed = urlparse(url.strip())
+    return parsed.scheme.lower() in LINKABLE_SCHEMES and bool(parsed.hostname)
+
+
 def _repo_cell(server_id: str, repo_urls: dict[str, str]) -> str:
     url = repo_urls.get(server_id)
-    if not url:
+    if not url or not linkable(url):
+        # Reads as unrecorded rather than rendering unlinked text: a blank cell
+        # looks like a rendering fault, and echoing a rejected URL as plain text
+        # puts an attacker's string on the page for no benefit.
         return '<span class="note">not recorded</span>'
     safe = escape(url, quote=True)
     return f'<a href="{safe}" rel="noopener nofollow">{escape(url)}</a>'

@@ -126,3 +126,49 @@ def test_server_content_is_escaped() -> None:
 
     assert "<img onerror" not in html
     assert "<script>" not in html.split("</style>")[1]
+
+
+@pytest.mark.parametrize(
+    "hostile",
+    [
+        "javascript:alert(document.domain)",
+        "JavaScript:alert(1)",
+        "  javascript:alert(1)",
+        "data:text/html;base64,PHNjcmlwdD5hbGVydCgxKTwvc2NyaXB0Pg==",
+        "vbscript:msgbox(1)",
+        "file:///etc/passwd",
+        "https://",
+    ],
+)
+def test_a_link_is_never_rendered_for_a_scheme_a_browser_would_execute(hostile: str) -> None:
+    """Escaping is not enough here, and that is the whole point.
+
+    `escape(url, quote=True)` stops an attribute break-out, and
+    `javascript:alert(1)` needs no quotes - it is a valid href value. The URL
+    reaches this function from data/servers.json, read into a plain dict, so
+    ServerRecord's https guarantee stops at the file boundary exactly as the
+    index loader's did. A javascript: href in a published page is stored XSS on
+    a public site.
+    """
+    html = render_server("x/y", SITE_WITH_GROUPS, repo_urls={"x/y": hostile})
+
+    assert "javascript:" not in html.lower()
+    assert "vbscript:" not in html.lower()
+    assert "data:text/html" not in html.lower()
+    assert "<a href=" not in html.split("<footer>")[0]
+
+
+def test_an_ordinary_repository_link_still_renders() -> None:
+    """The narrowing must not cost the link, which is the reason the field was
+    published at all."""
+    html = render_server("x/y", SITE_WITH_GROUPS, repo_urls={"x/y": "https://github.com/a/b"})
+
+    assert 'href="https://github.com/a/b"' in html
+
+
+def test_a_refused_url_reads_as_unrecorded_rather_than_vanishing() -> None:
+    """A blank cell looks like a rendering bug. Saying the address is not
+    recorded is true and is what a reader can act on."""
+    html = render_server("x/y", SITE_WITH_GROUPS, repo_urls={"x/y": "javascript:alert(1)"})
+
+    assert "not recorded" in html
