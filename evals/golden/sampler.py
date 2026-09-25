@@ -18,6 +18,7 @@ from analyzer.parsing.trees import LANGUAGE_BY_SUFFIX
 from analyzer.sampling import draw
 from analyzer.scanner import scan_directory
 from evals.golden.context import CONTEXT_LINES, capture_for_findings
+from evals.harness.experiment import suspect_functions
 
 # Spec section 10 targets 200 to 300 findings overall. Sixty per rule across
 # five rules lands inside that, and sixty is roughly where a proportion's
@@ -268,6 +269,21 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"{len(dropped)} findings dropped, uncapturable:", file=sys.stderr)
         for reason, n in Counter(v[:60] for v in dropped.values()).most_common():
             print(f"  {n:4}  {reason}", file=sys.stderr)
+
+    # An enclosing function far smaller than a window on the same line is the
+    # signature of a fragment being captured in place of the scope. Reported
+    # here because the first capture built for the context experiment had
+    # exactly that defect, and it was found by inspecting the distribution by
+    # hand rather than by anything that would catch it again.
+    suspect = suspect_functions(entries)
+    if suspect:
+        print(
+            f"{len(suspect)} captured functions far smaller than their window, "
+            "which suggests a fragment of the flagged line rather than its scope:",
+            file=sys.stderr,
+        )
+        for entry_id, ratio in suspect[:10]:
+            print(f"  {entry_id}  ratio {ratio:.3f}", file=sys.stderr)
     return 0
 
 
