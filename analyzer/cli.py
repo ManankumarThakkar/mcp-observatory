@@ -28,8 +28,15 @@ from analyzer.crawler.sample import sample_index
 from analyzer.errors import InputError
 from analyzer.fetcher.clone import FetchError, shallow_clone
 from analyzer.orchestrator import CloneFn, ScanFn
-from analyzer.pipeline import CollapsedRun, PipelineResult, publish_from_history, run_pipeline
+from analyzer.pipeline import (
+    CollapsedRun,
+    Intake,
+    PipelineResult,
+    publish_from_history,
+    run_pipeline,
+)
 from analyzer.report.merge import utc_stamp
+from analyzer.report.page import render_overview
 from analyzer.report.site import build_site_data, write_site_data
 from analyzer.scanner import scan_directory
 
@@ -70,6 +77,7 @@ DEFAULT_SAMPLE_SEED = 20260923
 # stale against the findings it describes, and the deploy workflow rebuilds it
 # from the single source every time.
 DEFAULT_SITE_DATA = Path("web/site-data.json")
+DEFAULT_SITE_PAGE = Path("web/index.html")
 
 # Published, and committed. Only findings that cleared the disclosure gate
 # reach here.
@@ -147,6 +155,9 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     site.add_argument(
         "--out", default=str(DEFAULT_SITE_DATA), help="Where to write the page's data."
+    )
+    site.add_argument(
+        "--page", default=str(DEFAULT_SITE_PAGE), help="Where to write the overview page."
     )
 
     crawl = subcommands.add_parser(
@@ -311,12 +322,17 @@ def run_index_scan(
     as long as the scan of that server takes.
     """
     records = load_server_index(index_path)
+    # Captured before sampling, because it is the denominator every published
+    # figure is measured against and nothing downstream can recover it.
+    intake = Intake(corpus=len(records))
     if sample is not None:
         records = sample_index(records, sample, seed=seed)
+        intake = Intake(corpus=intake.corpus, sampled=sample, seed=seed)
 
     with tempfile.TemporaryDirectory() as workdir:
         return run_pipeline(
             records,
+            intake=intake,
             clone=clone,
             scan=scan,
             workdir=Path(workdir),
@@ -394,9 +410,19 @@ def _site_command(args: argparse.Namespace) -> int:
     """Build the page's data from the published findings."""
     site = build_site_data(Path(args.data_dir))
     write_site_data(site, Path(args.out))
+
+    # The page carries its data inline rather than fetching the JSON beside
+    # it. A `fetch` from file:// is blocked as a cross-origin request in every
+    # current browser, so a page that fetched would work on a host and be blank
+    # for anyone who opened the file - including a reviewer handed the repo.
+    page = Path(args.page)
+    page.parent.mkdir(parents=True, exist_ok=True)
+    page.write_text(render_overview(site), encoding="utf-8")
+
     print(
-        f"{site.findings_total} findings as {site.decisions_total} decisions on "
-        f"{site.servers_affected} servers, {site.withheld} withheld -> {args.out}",
+        f"{site.findings_published} of {site.findings_found} findings as "
+        f"{site.decisions_published} decisions on "
+        f"{site.servers_affected} servers, {site.withheld} withheld -> {args.page}",
         file=sys.stderr,
     )
     return 0

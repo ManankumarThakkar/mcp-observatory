@@ -49,6 +49,25 @@ class CollapsedRun(Exception):
 
 
 @dataclass(frozen=True)
+class Intake:
+    """How the scanned set was chosen, so the published figures have a denominator.
+
+    A page stating "1,643 servers scanned" invites exactly one question, and
+    without this the published data cannot answer it. The chain is corpus,
+    then sampled, then scanned, then skipped and failed, and each step is a
+    number a reader can check against the one before it.
+
+    `sampled` and `seed` are None for a full-corpus scan rather than equal to
+    the corpus. "We sampled 21,492 of 21,492" invites a reader to look for a
+    sampling method that was not used; the absence is the honest statement.
+    """
+
+    corpus: int
+    sampled: int | None = None
+    seed: int | None = None
+
+
+@dataclass(frozen=True)
 class PipelineResult:
     """What one run did, for the caller and for the summary file."""
 
@@ -103,6 +122,7 @@ def run_pipeline(
     disclosure_records: Mapping[str, DisclosureRecord],
     now: datetime,
     tool_version: str,
+    intake: Intake,
     validate: ValidateFn = looks_like_server,
     collapse_ratio: float = COLLAPSE_RATIO,
 ) -> PipelineResult:
@@ -168,7 +188,7 @@ def run_pipeline(
         published=published_count,
         withheld=counts["withheld"] + counts["opted_out"],
     )
-    _write_summary(summary_path, result, counts, stamp, tool_version)
+    _write_summary(summary_path, result, counts, stamp, tool_version, intake)
     return result
 
 
@@ -322,6 +342,7 @@ def _write_summary(
     counts: Mapping[str, int],
     stamp: str,
     tool_version: str,
+    intake: Intake,
 ) -> None:
     """Publish the numbers even when the findings behind them are withheld.
 
@@ -332,6 +353,10 @@ def _write_summary(
     payload: dict[str, Any] = {
         "generated_at": stamp,
         "tool_version": tool_version,
+        # The denominator, and how the scanned set was chosen from it.
+        "corpus": intake.corpus,
+        "sampled": intake.sampled,
+        "sample_seed": intake.seed,
         "scanned": result.scanned,
         "skipped": result.skipped,
         "failed": result.failed,

@@ -8,7 +8,7 @@ from analyzer.crawler.registry import ServerRecord
 from analyzer.fetcher.clone import CloneResult
 from analyzer.models import Finding, Location
 from analyzer.orchestrator import ScanFn
-from analyzer.pipeline import CollapsedRun, PipelineResult, run_pipeline
+from analyzer.pipeline import CollapsedRun, Intake, PipelineResult, run_pipeline
 from analyzer.report.gate import DISCLOSURE_WINDOW, DisclosureRecord
 from analyzer.report.merge import load_previous
 from analyzer.scanner import ScanReport
@@ -68,6 +68,7 @@ def _run(
         disclosure_records=disclosure or {},
         now=now,
         tool_version="0.1.0",
+        intake=Intake(corpus=1),
         validate=lambda root: ServerEvidence(is_server=True, marker="x", path="y"),
     )
 
@@ -144,6 +145,7 @@ def test_a_candidate_that_cannot_prove_itself_contributes_nothing(tmp_path: Path
         disclosure_records={},
         now=NOW,
         tool_version="0.1.0",
+        intake=Intake(corpus=1),
         validate=lambda root: ServerEvidence(is_server=False),
     )
 
@@ -212,6 +214,7 @@ def test_a_server_that_failed_tonight_keeps_its_earlier_findings(tmp_path: Path)
         disclosure_records={},
         now=NOW + timedelta(days=1),
         tool_version="0.1.0",
+        intake=Intake(corpus=1),
         validate=lambda root: ServerEvidence(is_server=True, marker="x", path="y"),
     )
 
@@ -225,3 +228,53 @@ def test_the_sarif_document_carries_only_published_findings(tmp_path: Path) -> N
 
     document = json.loads((tmp_path / "data" / "findings.sarif").read_text(encoding="utf-8"))
     assert document["runs"][0]["results"] == []
+
+
+def test_the_summary_states_how_the_scanned_set_was_chosen(tmp_path: Path) -> None:
+    """A page saying "1,643 servers scanned" invites one question: out of how
+    many. The scan loads 21,492 repositories and samples 2,000, and dropped
+    both numbers, so the published output could state neither the denominator
+    nor the seed that selected the sample - and the sampling method is
+    published precisely so a reader can regenerate it.
+    """
+    result = run_pipeline(
+        [_record("a/one")],
+        clone=_clone_ok,
+        scan=_scanner(),
+        workdir=tmp_path / "work",
+        data_dir=tmp_path / "data",
+        cache_dir=tmp_path / "cache",
+        disclosure_records={},
+        now=NOW,
+        tool_version="0.1.0",
+        intake=Intake(corpus=21_492, sampled=2_000, seed=20260923),
+    )
+
+    summary = json.loads((tmp_path / "data" / "summary.json").read_text())
+    assert summary["corpus"] == 21_492
+    assert summary["sampled"] == 2_000
+    assert summary["sample_seed"] == 20260923
+    assert result.scanned == 1
+
+
+def test_a_full_corpus_scan_records_no_sample(tmp_path: Path) -> None:
+    """None rather than a number equal to the corpus. "We sampled 21,492 of
+    21,492" invites a reader to look for a sampling method that was not used,
+    and the absence is the honest statement.
+    """
+    run_pipeline(
+        [_record("a/one")],
+        clone=_clone_ok,
+        scan=_scanner(),
+        workdir=tmp_path / "work",
+        data_dir=tmp_path / "data",
+        cache_dir=tmp_path / "cache",
+        disclosure_records={},
+        now=NOW,
+        tool_version="0.1.0",
+        intake=Intake(corpus=21_492, sampled=None, seed=None),
+    )
+
+    summary = json.loads((tmp_path / "data" / "summary.json").read_text())
+    assert summary["sampled"] is None
+    assert summary["sample_seed"] is None
