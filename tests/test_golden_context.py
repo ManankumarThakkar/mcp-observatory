@@ -215,3 +215,54 @@ def test_a_finding_whose_repository_url_is_unknown_is_a_defect(tmp_path: Path) -
             scan=lambda root, server_id, commit_sha: ScanReport(findings=(finding,), skipped=()),
             workdir=tmp_path,
         )
+
+
+def test_each_clone_is_released_before_the_next_is_fetched(tmp_path: Path) -> None:
+    """The capture clones one repository per affected server - about 140 for a
+    300-entry set - and kept every one until the whole run finished. Peak disk
+    was the sum of every repository rather than the largest single one, which
+    is how a re-draw filled a disk and died part-way through.
+
+    A shallow clone is capped at 50 MB, so the accumulated worst case is
+    measured in gigabytes while the necessary worst case is 50 MB.
+    """
+    findings = [_finding(f"srv/{n}", "index.ts", 25, "exec(cmd)") for n in range(3)]
+    urls = {f.server_id: f"https://github.com/{f.server_id}" for f in findings}
+    peak = 0
+
+    def clone(repo_url: str, destination: Path) -> CloneResult:
+        nonlocal peak
+        result = _clone_writing(SOURCE)(repo_url, destination)
+        peak = max(peak, sum(1 for _ in tmp_path.rglob("index.ts")))
+        return result
+
+    capture_for_findings(
+        findings,
+        repo_urls=urls,
+        clone=clone,
+        scan=lambda root, server_id, commit_sha: ScanReport(
+            findings=tuple(f for f in findings if f.server_id == server_id), skipped=()
+        ),
+        workdir=tmp_path,
+    )
+
+    assert peak == 1, f"{peak} clones were on disk at once; each should be released"
+
+
+def test_a_clone_is_released_even_when_its_scan_fails(tmp_path: Path) -> None:
+    """The failure path is the one that fills a disk, because it is the path
+    taken by whatever is wrong with the repository."""
+    finding = _finding("a/one", "index.ts", 25, "exec(cmd)")
+
+    def failing_scan(root: Path, server_id: str, commit_sha: str) -> ScanReport:
+        raise OSError("scan blew up")
+
+    capture_for_findings(
+        [finding],
+        repo_urls={"a/one": "https://github.com/a/one"},
+        clone=_clone_writing(SOURCE),
+        scan=failing_scan,
+        workdir=tmp_path,
+    )
+
+    assert list(tmp_path.rglob("index.ts")) == []
