@@ -1,0 +1,13 @@
+{
+  "disclosure": {
+    "disclosed": 0,
+    "opted_out": 0,
+    "published": 322,
+    "withheld": 963
+  },
+  "failed": 0,
+  "generated_at": "2026-09-25T01:10:58Z",
+  "scanned": 1643,
+  "skipped": 357,
+  "tool_version": "0.1.0"
+}

@@ -28,7 +28,7 @@ from analyzer.crawler.sample import sample_index
 from analyzer.errors import InputError
 from analyzer.fetcher.clone import FetchError, shallow_clone
 from analyzer.orchestrator import CloneFn, ScanFn
-from analyzer.pipeline import CollapsedRun, PipelineResult, run_pipeline
+from analyzer.pipeline import CollapsedRun, PipelineResult, publish_from_history, run_pipeline
 from analyzer.report.merge import utc_stamp
 from analyzer.scanner import scan_directory
 
@@ -115,6 +115,22 @@ def _build_parser() -> argparse.ArgumentParser:
         "--cache-dir",
         default=str(DEFAULT_CACHE_DIR),
         help="Where the full history lives. Never published.",
+    )
+
+    publish = subcommands.add_parser(
+        "publish",
+        help="Publish what the disclosure gate allows, from the history, without scanning.",
+    )
+    publish.add_argument(
+        "--data-dir", default=str(DEFAULT_DATA_DIR), help="Where published results go."
+    )
+    publish.add_argument(
+        "--cache-dir", default=str(DEFAULT_CACHE_DIR), help="Where the full history lives."
+    )
+    publish.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Report what would be published and withheld, and write nothing.",
     )
 
     crawl = subcommands.add_parser(
@@ -315,6 +331,49 @@ def _scan_index(args: argparse.Namespace) -> int:
     return 0
 
 
+def _publish_command(args: argparse.Namespace) -> int:
+    """Republish from the history, or say what republishing would do.
+
+    `--dry-run` exists because publishing findings against named third-party
+    servers is not reversible in the way a local file is: once a commit is
+    pushed, it is public whatever happens next. Being able to read the exact
+    counts first makes that a decision rather than a discovery.
+    """
+    data_dir, cache_dir = Path(args.data_dir), Path(args.cache_dir)
+
+    if args.dry_run:
+        with tempfile.TemporaryDirectory() as scratch:
+            # Written to a throwaway directory so the report is produced by the
+            # same code path that would publish, rather than by a second
+            # implementation that could disagree with it.
+            result = publish_from_history(
+                cache_dir=cache_dir,
+                data_dir=Path(scratch),
+                disclosure_records={},
+                now=datetime.now(UTC),
+                tool_version=__version__,
+            )
+        print(
+            f"would publish {result.published} findings and withhold {result.withheld}; "
+            "nothing written",
+            file=sys.stderr,
+        )
+        return 0
+
+    result = publish_from_history(
+        cache_dir=cache_dir,
+        data_dir=data_dir,
+        disclosure_records={},
+        now=datetime.now(UTC),
+        tool_version=__version__,
+    )
+    print(
+        f"{result.published} published, {result.withheld} withheld -> {data_dir}",
+        file=sys.stderr,
+    )
+    return 0
+
+
 def _crawl(args: argparse.Namespace) -> int:
     search = None
     if args.with_code_search:
@@ -360,7 +419,11 @@ def main(argv: list[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
 
     try:
-        return _scan(args) if args.command == "scan" else _crawl(args)
+        if args.command == "scan":
+            return _scan(args)
+        if args.command == "publish":
+            return _publish_command(args)
+        return _crawl(args)
     except (
         CollapsedRun,
         FetchError,

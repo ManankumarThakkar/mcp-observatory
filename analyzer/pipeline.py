@@ -1,7 +1,7 @@
 """The nightly run: crawl output in, published findings out."""
 
 import json
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -57,6 +57,24 @@ class PipelineResult:
     failed: int
     published: int
     withheld: int
+
+
+def _previous_coverage(summary_path: Path) -> int | None:
+    """The scanned count from a previous run, or None if there is not one.
+
+    Distinct from `_previous_scanned`, which returns zero for "no previous
+    run" because the collapse guard treats absence as nothing to compare
+    against. Here absence must be refused rather than treated as zero, so the
+    two cases cannot share a return value.
+    """
+    if not summary_path.exists():
+        return None
+    try:
+        payload = json.loads(summary_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return None
+    scanned = payload.get("scanned")
+    return scanned if isinstance(scanned, int) else None
 
 
 def _previous_scanned(summary_path: Path) -> int:
@@ -135,9 +153,44 @@ def run_pipeline(
     merged = merge_findings(load_previous(history_path), current, now=stamp)
     write_findings(history_path, merged)
 
-    # The gate runs over the whole merged history rather than tonight's
-    # findings alone, so a finding withheld last month is published the night
-    # its window closes rather than waiting to be seen again.
+    published_count, counts = _publish(
+        merged,
+        data_dir=data_dir,
+        disclosure_records=disclosure_records,
+        now=now,
+        tool_version=tool_version,
+    )
+
+    result = PipelineResult(
+        scanned=scanned,
+        skipped=skipped,
+        failed=failed,
+        published=published_count,
+        withheld=counts["withheld"] + counts["opted_out"],
+    )
+    _write_summary(summary_path, result, counts, stamp, tool_version)
+    return result
+
+
+def _publish(
+    merged: Sequence[Mapping[str, Any]],
+    *,
+    data_dir: Path,
+    disclosure_records: Mapping[str, DisclosureRecord],
+    now: datetime,
+    tool_version: str,
+) -> tuple[int, Mapping[str, int]]:
+    """Write the publishable findings and the SARIF beside them.
+
+    Shared by the scan pipeline and by republication, so there is exactly one
+    route past the disclosure gate. Two implementations of "what may be
+    published" would drift, and the drift would surface as findings reaching
+    a public directory by the path nobody was checking.
+
+    The gate runs over the whole history rather than one night's findings, so a
+    finding withheld last month is published when its window closes rather
+    than waiting to be seen again.
+    """
     findings = [Finding.from_dict(record) for record in merged]
     published, counts = split_for_publication(findings, disclosure_records, now=now)
     publishable = {finding.finding_id for finding in published}
@@ -162,16 +215,105 @@ def run_pipeline(
         json.dumps(to_sarif(published, tool_version=tool_version), indent=2) + "\n",
         encoding="utf-8",
     )
+    return len(published), counts
 
-    result = PipelineResult(
-        scanned=scanned,
-        skipped=skipped,
-        failed=failed,
-        published=len(published),
-        withheld=counts["withheld"] + counts["opted_out"],
+
+@dataclass(frozen=True)
+class PublishResult:
+    """What one republication released, and what it held back."""
+
+    published: int
+    withheld: int
+
+
+def publish_from_history(
+    *,
+    cache_dir: Path,
+    data_dir: Path,
+    disclosure_records: Mapping[str, DisclosureRecord],
+    now: datetime,
+    tool_version: str,
+) -> PublishResult:
+    """Publish what the gate allows, from the history alone.
+
+    Scanning and publishing are separate concerns and coupling them was wrong
+    in two ways. Republishing required a full rescan of twenty-one thousand
+    repositories, which is thirteen minutes and a network to change nothing but
+    a date. And a disclosure window closing had no effect until a scan
+    succeeded, so a run stopped by the collapse guard also held back every
+    finding whose ninety days had elapsed - the gate failing closed for a
+    reason that had nothing to do with disclosure.
+
+    The gate itself is unchanged and shared: this is a second caller, never a
+    second rule.
+
+    A missing history raises rather than publishing nothing. Writing an empty
+    `data/` would replace a good publication with silence and read as an
+    ecosystem that fixed itself overnight.
+    """
+    history_path = cache_dir / HISTORY_FILE
+    if not history_path.exists():
+        raise FileNotFoundError(
+            f"no history at {history_path}; there is nothing to publish without a scan"
+        )
+
+    summary_path = data_dir / SUMMARY_FILE
+    coverage = _previous_coverage(summary_path)
+    if coverage is None:
+        # The history records findings, not how many servers were scanned: 306
+        # of 1,642 produced anything. So a republication cannot know the
+        # denominator, and a summary without it publishes findings with no
+        # coverage figure - which is the one number success criterion 1 is
+        # about, and the one a reader uses to judge how current the results
+        # are. Scanning is the only thing that can establish it.
+        raise ValueError(
+            f"{summary_path} carries no scanned count, so coverage cannot be "
+            "republished; run a scan instead"
+        )
+
+    merged = load_previous(history_path)
+    published, counts = _publish(
+        merged,
+        data_dir=data_dir,
+        disclosure_records=disclosure_records,
+        now=now,
+        tool_version=tool_version,
     )
-    _write_summary(summary_path, result, counts, stamp, tool_version)
-    return result
+    _stamp_publication(summary_path, counts, utc_stamp(now), tool_version)
+    return PublishResult(published=published, withheld=counts["withheld"] + counts["opted_out"])
+
+
+def _stamp_publication(
+    path: Path, counts: Mapping[str, int], stamp: str, tool_version: str
+) -> None:
+    """Update the disclosure counts and date the publication, keeping the scan.
+
+    The coverage figures describe the scan that produced them, and nothing was
+    scanned here. Overwriting `generated_at` would date a 1,642-server scan to
+    a day on which nothing was scanned, and a reader comparing the two would be
+    wrong about when the corpus was examined. So the scan block is preserved
+    and `published_at` is added beside it; equal values mean one operation did
+    both.
+    """
+    payload: dict[str, Any] = {}
+    if path.exists():
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            payload = {}
+
+    payload.update(
+        {
+            "published_at": stamp,
+            "tool_version": tool_version,
+            "disclosure": dict(counts),
+        }
+    )
+    # generated_at is deliberately never defaulted to now. It describes the
+    # scan, and republication scans nothing; the caller has already refused to
+    # proceed without a prior summary, so it is always present here.
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
 def _write_summary(
