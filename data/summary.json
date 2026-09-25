@@ -3,11 +3,11 @@
   "disclosure": {
     "disclosed": 0,
     "opted_out": 0,
-    "published": 322,
-    "withheld": 969
+    "published": 323,
+    "withheld": 973
   },
   "failed": 0,
-  "generated_at": "2026-09-25T02:30:28Z",
+  "generated_at": "2026-09-25T08:18:46Z",
   "sample_seed": 20260923,
   "sampled": 2000,
   "scanned": 1643,

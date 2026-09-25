@@ -1,0 +1,582 @@
+[
+  {
+    "repo_url": "https://github.com/matebenyovszky/agentplaybooks",
+    "server_id": "ai.agentplaybooks/agentplaybooks"
+  },
+  {
+    "repo_url": "https://github.com/SIFR0-dev/djzs-AI",
+    "server_id": "ai.djzs/trust-mcp"
+  },
+  {
+    "repo_url": "https://github.com/Trusty-Squire/trusty-squire",
+    "server_id": "ai.trustysquire/trusty-squire"
+  },
+  {
+    "repo_url": "https://github.com/theonaai/linkedin-content-planner-mcp",
+    "server_id": "app.theona/linkedin-content-planner"
+  },
+  {
+    "repo_url": "https://github.com/catalunya-2022/mcp",
+    "server_id": "cat.2022/catalunya-2022"
+  },
+  {
+    "repo_url": "https://github.com/zach-eikenberry/530A",
+    "server_id": "com.530amodel/calculator"
+  },
+  {
+    "repo_url": "https://github.com/adbutler/mcp-server",
+    "server_id": "com.adbutler/mcp-server"
+  },
+  {
+    "repo_url": "https://github.com/BingoWon/apple-rag-mcp",
+    "server_id": "com.apple-rag/mcp-server"
+  },
+  {
+    "repo_url": "https://github.com/Bgenc48/arc-ledger-mcp",
+    "server_id": "com.arcandledger/tax-tools"
+  },
+  {
+    "repo_url": "https://github.com/CPZ-Lab/cpzai-mcp-server",
+    "server_id": "com.cpz-lab.mcp/cpzai"
+  },
+  {
+    "repo_url": "https://github.com/kirill-markin/expense-budget-tracker",
+    "server_id": "com.expense-budget-tracker/expense-budget-tracker"
+  },
+  {
+    "repo_url": "https://github.com/generect/generect_mcp.git",
+    "server_id": "com.generect/generect-mcp"
+  },
+  {
+    "repo_url": "https://github.com/Crindo2/gth-mcp-server",
+    "server_id": "com.gettreatmenthelp/gettreatmenthelp"
+  },
+  {
+    "repo_url": "https://github.com/gtm-api/linkedin-mcp",
+    "server_id": "com.gtm-api/linkedin-mcp"
+  },
+  {
+    "repo_url": "https://github.com/jasonbrelsford/verifiable-science-envs",
+    "server_id": "com.hlaverify/hla-verify"
+  },
+  {
+    "repo_url": "https://github.com/Nooticr/nooticr-mcp",
+    "server_id": "com.nooticr/mcp"
+  },
+  {
+    "repo_url": "https://github.com/onkernel/kernel-mcp-server",
+    "server_id": "com.onkernel/kernel-mcp-server"
+  },
+  {
+    "repo_url": "https://github.com/PostPulse/mcp-server-postpulse",
+    "server_id": "com.post-pulse/mcp-server"
+  },
+  {
+    "repo_url": "https://github.com/sunex-ai/optics-mcp",
+    "server_id": "com.sunex/optics-mcp"
+  },
+  {
+    "repo_url": "https://github.com/bekirdag/tnl-intelligence",
+    "server_id": "com.theneuralledger/intelligence"
+  },
+  {
+    "repo_url": "https://github.com/vishprometa/universal-agent-forum",
+    "server_id": "com.universalagentforum/forum"
+  },
+  {
+    "repo_url": "https://github.com/FileToPDF/filetopdf-mcp",
+    "server_id": "dev.filetopdf/filetopdf-mcp"
+  },
+  {
+    "repo_url": "https://github.com/vasilistotskas/weblens",
+    "server_id": "dev.weblens/weblens"
+  },
+  {
+    "repo_url": "https://github.com/Ansvar-Systems/italian-law-mcp",
+    "server_id": "eu.ansvar/italian-law-mcp"
+  },
+  {
+    "repo_url": "https://github.com/47-ronn/tunshell_mcp_agents",
+    "server_id": "io.github.47-ronn/remote-agents"
+  },
+  {
+    "repo_url": "https://github.com/930m310n/geomelon-mcp",
+    "server_id": "io.github.930m310n/geomelon-mcp"
+  },
+  {
+    "repo_url": "https://github.com/Br0ski777/gas-estimator-x402",
+    "server_id": "io.github.Br0ski777/gas-estimator"
+  },
+  {
+    "repo_url": "https://github.com/Br0ski777/gas-oracle-x402",
+    "server_id": "io.github.Br0ski777/gas-oracle"
+  },
+  {
+    "repo_url": "https://github.com/Br0ski777/gdpr-scanner-x402",
+    "server_id": "io.github.Br0ski777/gdpr-scanner"
+  },
+  {
+    "repo_url": "https://github.com/Br0ski777/json-validator-x402",
+    "server_id": "io.github.Br0ski777/json-validator"
+  },
+  {
+    "repo_url": "https://github.com/Br0ski777/jupiter-quotes-x402",
+    "server_id": "io.github.Br0ski777/jupiter-quotes"
+  },
+  {
+    "repo_url": "https://github.com/Br0ski777/ocr-extract-x402",
+    "server_id": "io.github.Br0ski777/ocr-extract"
+  },
+  {
+    "repo_url": "https://github.com/Br0ski777/password-strength-x402",
+    "server_id": "io.github.Br0ski777/password-strength"
+  },
+  {
+    "repo_url": "https://github.com/Br0ski777/sentiment-analyzer-x402",
+    "server_id": "io.github.Br0ski777/sentiment-analyzer"
+  },
+  {
+    "repo_url": "https://github.com/Br0ski777/text-to-speech-x402",
+    "server_id": "io.github.Br0ski777/text-to-speech"
+  },
+  {
+    "repo_url": "https://github.com/Br0ski777/text-translator-x402",
+    "server_id": "io.github.Br0ski777/text-translator"
+  },
+  {
+    "repo_url": "https://github.com/Br0ski777/trust-score-x402",
+    "server_id": "io.github.Br0ski777/trust-score"
+  },
+  {
+    "repo_url": "https://github.com/Br0ski777/url-shortener-x402",
+    "server_id": "io.github.Br0ski777/url-shortener"
+  },
+  {
+    "repo_url": "https://github.com/BrightbeamAI/chap",
+    "server_id": "io.github.BrightbeamAI/chap"
+  },
+  {
+    "repo_url": "https://github.com/DmitriyGolub/threejs-devtools-mcp",
+    "server_id": "io.github.DmitriyGolub/threejs-devtools"
+  },
+  {
+    "repo_url": "https://github.com/Echolonius/token-intel-x402",
+    "server_id": "io.github.Echolonius/token-intel"
+  },
+  {
+    "repo_url": "https://github.com/FastAlertNow/mcp-server",
+    "server_id": "io.github.FastAlertNow/mcp-server"
+  },
+  {
+    "repo_url": "https://github.com/Jemplayer82/mcp-switchboard",
+    "server_id": "io.github.Jemplayer82/mcp-switchboard"
+  },
+  {
+    "repo_url": "https://github.com/Kind-ling/twig",
+    "server_id": "io.github.Kind-ling/twig"
+  },
+  {
+    "repo_url": "https://github.com/Mike05102/anime-intelligence-mcp",
+    "server_id": "io.github.Mike05102/anime-intelligence-mcp"
+  },
+  {
+    "repo_url": "https://github.com/New1Direction/webmcp-anything",
+    "server_id": "io.github.New1Direction/trust-oracle"
+  },
+  {
+    "repo_url": "https://github.com/Omodaka9375/wake",
+    "server_id": "io.github.Omodaka9375/wake"
+  },
+  {
+    "repo_url": "https://github.com/PStryder/TablaCognita",
+    "server_id": "io.github.PStryder/tablacognita"
+  },
+  {
+    "repo_url": "https://github.com/SYMBaiEX/usagemax",
+    "server_id": "io.github.SYMBaiEX/usagemax"
+  },
+  {
+    "repo_url": "https://github.com/SidneyBissoli/medical-terminologies-mcp",
+    "server_id": "io.github.SidneyBissoli/medical-terminologies-mcp"
+  },
+  {
+    "repo_url": "https://github.com/ShinyDapps/l402-kit",
+    "server_id": "io.github.ThiagoDataEngineer/l402-kit"
+  },
+  {
+    "repo_url": "https://github.com/WYRE-AI/xero-mcp",
+    "server_id": "io.github.WYRE-AI/xero-mcp"
+  },
+  {
+    "repo_url": "https://github.com/Wonderfulian/kbv-server",
+    "server_id": "io.github.Wonderfulian/kbv-server"
+  },
+  {
+    "repo_url": "https://github.com/alisaitteke/photoshop-mcp",
+    "server_id": "io.github.alisaitteke/photoshop-mcp"
+  },
+  {
+    "repo_url": "https://github.com/amansingh63/dbhub-analytics",
+    "server_id": "io.github.amansingh63/dbhub-analytics"
+  },
+  {
+    "repo_url": "https://github.com/antvis/mcp-server-chart",
+    "server_id": "io.github.antvis/mcp-server-chart"
+  },
+  {
+    "repo_url": "https://github.com/assafbar2/agentswitchboard.dev",
+    "server_id": "io.github.assafbar2/agentswitchboard"
+  },
+  {
+    "repo_url": "https://github.com/FusionpactTech/fusionpact-vectordb",
+    "server_id": "io.github.atul-fusionpact/fusionpact-vectordb"
+  },
+  {
+    "repo_url": "https://github.com/beyondnetcode/evolith_arch32",
+    "server_id": "io.github.beyondnetcode/evolith"
+  },
+  {
+    "repo_url": "https://github.com/brandonclark1996-design/toolrank",
+    "server_id": "io.github.brandonclark1996-design/toolrank"
+  },
+  {
+    "repo_url": "https://github.com/carbaj03/solution-commons",
+    "server_id": "io.github.carbaj03/solution-commons"
+  },
+  {
+    "repo_url": "https://github.com/chibataku0815/vecmo",
+    "server_id": "io.github.chibataku0815/vecmo"
+  },
+  {
+    "repo_url": "https://github.com/copperline-labs/rendex-mcp",
+    "server_id": "io.github.copperline-labs/rendex-mcp"
+  },
+  {
+    "repo_url": "https://github.com/dappros/ethora-mcp-cli",
+    "server_id": "io.github.dappros/ethora-mcp-cli"
+  },
+  {
+    "repo_url": "https://github.com/derNif/payanagent",
+    "server_id": "io.github.derNif/payanagent"
+  },
+  {
+    "repo_url": "https://github.com/docracy1/runwayleft",
+    "server_id": "io.github.docracy1/runwayleft"
+  },
+  {
+    "repo_url": "https://github.com/dominiclachance/neurakeep",
+    "server_id": "io.github.dominiclachance/neurakeep"
+  },
+  {
+    "repo_url": "https://github.com/douglasgan/asktian-mcp",
+    "server_id": "io.github.douglasgan/asktian"
+  },
+  {
+    "repo_url": "https://github.com/dubaikseniia-wq/entra-mcp",
+    "server_id": "io.github.dubaikseniia-wq/entra-mcp"
+  },
+  {
+    "repo_url": "https://github.com/easingthemes/aem-mcp-server",
+    "server_id": "io.github.easingthemes/aem-mcp-server"
+  },
+  {
+    "repo_url": "https://github.com/edycutjong/bagos",
+    "server_id": "io.github.edycutjong/bagos"
+  },
+  {
+    "repo_url": "https://github.com/entreprisedaney33-rgb/x402-seller",
+    "server_id": "io.github.entreprisedaney33-rgb/x402-seller-mcp"
+  },
+  {
+    "repo_url": "https://github.com/fboldo/openscad-mcp-server",
+    "server_id": "io.github.fboldo/openscad-mcp-server"
+  },
+  {
+    "repo_url": "https://github.com/godavid/gitjog",
+    "server_id": "io.github.godavid/gitjog"
+  },
+  {
+    "repo_url": "https://github.com/gosodax/builders-sodax-mcp-server",
+    "server_id": "io.github.gosodax/builders-mcp"
+  },
+  {
+    "repo_url": "https://github.com/greencore-solutions/gsc-fleet-mcp",
+    "server_id": "io.github.greencore-solutions/gsc-fleet-mcp"
+  },
+  {
+    "repo_url": "https://github.com/grichardomi/mcp-server",
+    "server_id": "io.github.grichardomi/faxseal"
+  },
+  {
+    "repo_url": "https://github.com/guptaprakhariitr/drug-interaction-mcp",
+    "server_id": "io.github.guptaprakhariitr/drug-interaction-mcp"
+  },
+  {
+    "repo_url": "https://github.com/hongnoul/hwatu",
+    "server_id": "io.github.hongnoul/hwatu"
+  },
+  {
+    "repo_url": "https://github.com/iadnanmukhtar/hadithdb",
+    "server_id": "io.github.iadnanmukhtar/hadithdb"
+  },
+  {
+    "repo_url": "https://github.com/imran-siddique/agent-os",
+    "server_id": "io.github.imran-siddique/agentos"
+  },
+  {
+    "repo_url": "https://github.com/ironflowsh/mcp",
+    "server_id": "io.github.ironflowsh/mcp"
+  },
+  {
+    "repo_url": "https://github.com/viridis-security/verdigraph-neurogenesis",
+    "server_id": "io.github.jdhart81/verdigraph-mcp"
+  },
+  {
+    "repo_url": "https://github.com/jigarkkarangiya/adobe-commerce-docs-mcp",
+    "server_id": "io.github.jigarkkarangiya/adobe-commerce-docs-mcp"
+  },
+  {
+    "repo_url": "https://github.com/josephibra/handoff-mcp-server",
+    "server_id": "io.github.josephibra/handoff-mcp-server"
+  },
+  {
+    "repo_url": "https://github.com/kambleaa007/GrappleAI",
+    "server_id": "io.github.kambleaa007/weather"
+  },
+  {
+    "repo_url": "https://github.com/khalidsaidi/ragmap",
+    "server_id": "io.github.khalidsaidi/ragmap"
+  },
+  {
+    "repo_url": "https://github.com/kphatak001/agent-lounge",
+    "server_id": "io.github.kphatak001/agent-lounge"
+  },
+  {
+    "repo_url": "https://github.com/krupalghori44-dev/infyicon-mcp",
+    "server_id": "io.github.krupalghori44-dev/infyicon-mcp"
+  },
+  {
+    "repo_url": "https://github.com/linxule/durable-thinking",
+    "server_id": "io.github.linxule/durable-thinking"
+  },
+  {
+    "repo_url": "https://github.com/lonniev/roastify-mcp",
+    "server_id": "io.github.lonniev/roastify-mcp"
+  },
+  {
+    "repo_url": "https://github.com/lucyfuur94/webnav-core",
+    "server_id": "io.github.lucyfuur94/webnav"
+  },
+  {
+    "repo_url": "https://github.com/luisa-sys/lyra-mcp-server",
+    "server_id": "io.github.luisa-sys/lyra-mcp-server"
+  },
+  {
+    "repo_url": "https://github.com/mapdevsaikat/quantaroute-geocoder",
+    "server_id": "io.github.mapdevsaikat/quantaroute-geocoder"
+  },
+  {
+    "repo_url": "https://github.com/markmnl/fmsg-mcp",
+    "server_id": "io.github.markmnl/fmsg-mcp"
+  },
+  {
+    "repo_url": "https://github.com/tata1mg/catalyst-core",
+    "server_id": "io.github.mayankmahavar1mg/mcp"
+  },
+  {
+    "repo_url": "https://github.com/meltingpixelsai/harvey-budget",
+    "server_id": "io.github.meltingpixelsai/harvey-budget"
+  },
+  {
+    "repo_url": "https://github.com/meltingpixelsai/harvey-verify",
+    "server_id": "io.github.meltingpixelsai/harvey-verify"
+  },
+  {
+    "repo_url": "https://github.com/milesdev888/cyre-fraud-prediction",
+    "server_id": "io.github.milesdev888/guardian"
+  },
+  {
+    "repo_url": "https://github.com/mizukaizen/hive-doctrine-mcp",
+    "server_id": "io.github.mizukaizen/hive-doctrine-mcp"
+  },
+  {
+    "repo_url": "https://github.com/nirholas/lyra-web3-playground",
+    "server_id": "io.github.nirholas/solidity-compiler"
+  },
+  {
+    "repo_url": "https://github.com/nulljosh/sidewise",
+    "server_id": "io.github.nulljosh/newsline"
+  },
+  {
+    "repo_url": "https://github.com/nyuchi/mukoko-news",
+    "server_id": "io.github.nyuchi/mukoko-news"
+  },
+  {
+    "repo_url": "https://github.com/pcas-io/plexus",
+    "server_id": "io.github.pcas-io/plexus"
+  },
+  {
+    "repo_url": "https://github.com/pipeshub-ai/mcp-server",
+    "server_id": "io.github.pipeshub-ai/mcp"
+  },
+  {
+    "repo_url": "https://github.com/proplineapi/propline-mcp",
+    "server_id": "io.github.proplineapi/propline-mcp"
+  },
+  {
+    "repo_url": "https://github.com/pscale-commons/bsp-mcp-server",
+    "server_id": "io.github.pscale-commons/bsp-mcp"
+  },
+  {
+    "repo_url": "https://github.com/quantumproxies/quanticdata-mcp-server",
+    "server_id": "io.github.quantumproxies/quanticdata-mcp"
+  },
+  {
+    "repo_url": "https://github.com/roomi-fields/notebooklm-mcp",
+    "server_id": "io.github.roomi-fields/notebooklm-mcp"
+  },
+  {
+    "repo_url": "https://github.com/ryaker/appstore-connect-mcp",
+    "server_id": "io.github.ryaker/appstore-connect-mcp"
+  },
+  {
+    "repo_url": "https://github.com/sean-park-funda/korea-ocean-mcp",
+    "server_id": "io.github.sean-park-funda/korea-ocean-mcp"
+  },
+  {
+    "repo_url": "https://github.com/selflabbs/weather-intel-mcp",
+    "server_id": "io.github.selflabbs/weather-intel-mcp"
+  },
+  {
+    "repo_url": "https://github.com/sensact-agents/Sensact",
+    "server_id": "io.github.sensact-agents/sensact"
+  },
+  {
+    "repo_url": "https://github.com/sidebutton/sidebutton",
+    "server_id": "io.github.sidebutton/sidebutton"
+  },
+  {
+    "repo_url": "https://github.com/navifare/navifare-mcp",
+    "server_id": "io.github.simonenavifare/navifare-mcp"
+  },
+  {
+    "repo_url": "https://github.com/smigolsmigol/llmkit",
+    "server_id": "io.github.smigolsmigol/llmkit"
+  },
+  {
+    "repo_url": "https://github.com/Affitor/open-affiliate",
+    "server_id": "io.github.sonpiaz/openaffiliate-mcp"
+  },
+  {
+    "repo_url": "https://github.com/sp0oby/zkShare",
+    "server_id": "io.github.sp0oby/zkshare"
+  },
+  {
+    "repo_url": "https://github.com/srotzin/hive-mcp-connector",
+    "server_id": "io.github.srotzin/hive-mcp-connector"
+  },
+  {
+    "repo_url": "https://github.com/sshwarts/napkin",
+    "server_id": "io.github.sshwarts/napkin"
+  },
+  {
+    "repo_url": "https://github.com/stockmarketscan/earningscalls-mcp",
+    "server_id": "io.github.stockmarketscan/earningscalls-mcp"
+  },
+  {
+    "repo_url": "https://github.com/subsquid-labs/portal-mcp-server",
+    "server_id": "io.github.subsquid-labs/portal-mcp-server"
+  },
+  {
+    "repo_url": "https://github.com/WasmAgent/wasmagent-js",
+    "server_id": "io.github.telleroutlook/mcp-server"
+  },
+  {
+    "repo_url": "https://github.com/theYahia/robokassa-mcp",
+    "server_id": "io.github.theYahia/robokassa-mcp"
+  },
+  {
+    "repo_url": "https://github.com/therealMrFunGuy/clubhouse-agent-protocol",
+    "server_id": "io.github.therealMrFunGuy/clubhouse"
+  },
+  {
+    "repo_url": "https://github.com/vassiliylakhonin/vizier",
+    "server_id": "io.github.vassiliylakhonin/vizier-guard"
+  },
+  {
+    "repo_url": "https://github.com/veynor-xyz/veynor-mcp",
+    "server_id": "io.github.veynor-xyz/veynor"
+  },
+  {
+    "repo_url": "https://github.com/vincentvella/devloop",
+    "server_id": "io.github.vincentvella/devloop"
+  },
+  {
+    "repo_url": "https://github.com/vuluu2k/webcake-storefront-mcp",
+    "server_id": "io.github.vuluu2k/webcake-storefront-mcp"
+  },
+  {
+    "repo_url": "https://github.com/wvdsh/ai",
+    "server_id": "io.github.wvdsh/wavedash"
+  },
+  {
+    "repo_url": "https://github.com/wyattpalm2-eng/x402-seller",
+    "server_id": "io.github.wyattpalm2-eng/x402-seller"
+  },
+  {
+    "repo_url": "https://github.com/wyre-technology/immybot-mcp",
+    "server_id": "io.github.wyre-technology/immybot-mcp"
+  },
+  {
+    "repo_url": "https://github.com/wyre-technology/itglue-mcp",
+    "server_id": "io.github.wyre-technology/itglue-mcp"
+  },
+  {
+    "repo_url": "https://github.com/wyre-technology/mailprotector-mcp",
+    "server_id": "io.github.wyre-technology/mailprotector-mcp"
+  },
+  {
+    "repo_url": "https://github.com/wyre-technology/syncro-mcp",
+    "server_id": "io.github.wyre-technology/syncro-mcp"
+  },
+  {
+    "repo_url": "https://github.com/xyzzylabs/tc39-mcp",
+    "server_id": "io.github.xyzzylabs/tc39-mcp"
+  },
+  {
+    "repo_url": "https://github.com/zhowe-designs/relay-mcp",
+    "server_id": "io.github.zhowe-designs/relay-mcp"
+  },
+  {
+    "repo_url": "https://github.com/grovs-io/mcp",
+    "server_id": "io.grovs/mcp"
+  },
+  {
+    "repo_url": "https://github.com/opentweetio/mcp-server",
+    "server_id": "io.opentweet/mcp"
+  },
+  {
+    "repo_url": "https://github.com/ScanBIM-Labs/navisworks-mcp",
+    "server_id": "io.scanbimlabs/navisworks"
+  },
+  {
+    "repo_url": "https://github.com/pyosang82/atoa-stream",
+    "server_id": "live.pulsarsignal/pulsar"
+  },
+  {
+    "repo_url": "https://github.com/Cantara/kcp-harness",
+    "server_id": "no.cantara/kcp-harness"
+  },
+  {
+    "repo_url": "https://github.com/thorchain/swap.thorchain",
+    "server_id": "org.thorchain.swap/thorchain-swap"
+  },
+  {
+    "repo_url": "https://github.com/InvoiceBox/invoicebox-mcp-server",
+    "server_id": "ru.invoicebox/mcp-server"
+  },
+  {
+    "repo_url": "https://github.com/buildinternet/releases",
+    "server_id": "sh.releases/mcp"
+  }
+]
