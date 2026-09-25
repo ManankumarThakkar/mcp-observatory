@@ -11,7 +11,6 @@ from analyzer.fetcher.clone import CloneTooLarge, FetchError
 from analyzer.models import Finding
 from analyzer.orchestrator import UNREACHABLE_ERRORS, CloneFn, ScanFn
 from analyzer.parsing.trees import parse_source
-from analyzer.rules import ALL_RULES
 from analyzer.scanner import ScanReport
 
 # Exactly the failures that mean "this repository cannot be read", and nothing
@@ -115,11 +114,6 @@ FUNCTION_NODES = frozenset(
 # A function larger than this is not a judgement aid, it is a wall. Falls back
 # to the line window, which at least centres on the finding.
 MAX_FUNCTION_CHARS = 12_000
-
-# Read from the rules rather than listed here, so a sixth rule arrives with its
-# own answer instead of silently defaulting to the wrong one.
-_NEEDS_FUNCTION = {rule.rule_id: rule.needs_enclosing_function for rule in ALL_RULES}
-
 
 def capture_for_judgement(
     source: str, line: int, *, suffix: str, enclosing: bool
@@ -356,8 +350,13 @@ def _capture_from(
             result.dropped[finding.finding_id] = "line is past the end of the file"
             continue
         result.contexts[finding.finding_id] = window
-        # Only for the rules whose findings a window cannot settle. Carrying it
-        # for the others would offer a second condition that was never tested.
-        if enclosing is not None and _NEEDS_FUNCTION.get(finding.rule_id, False):
+        # Captured wherever a function exists, including for the rules the
+        # manipulation is predicted not to help. Those are the control group:
+        # if a wider context raises an adjudicator's confidence everywhere, the
+        # dull explanation is that more text reads as more evidence, and only a
+        # set of findings predicted not to move can rule that out. Which rules
+        # are predicted to move is recorded on the rules themselves, so it stays
+        # an analysis-time distinction rather than being decided here.
+        if enclosing is not None:
             result.functions[finding.finding_id] = enclosing
 

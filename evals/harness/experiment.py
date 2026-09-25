@@ -15,8 +15,11 @@ entries that become decidable under the wider context are counted separately,
 and their composition is the finding.
 """
 
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from typing import Any
 
+from analyzer.rules import ALL_RULES
 from evals.golden.label import CONDITIONS
 
 # The two labels that count as a decision. Anything else is the labeller saying
@@ -161,3 +164,41 @@ def suspect_functions(
         if ratio < SUSPECT_RATIO:
             suspect.append((str(entry.get("entry_id")), ratio))
     return sorted(suspect, key=lambda pair: pair[1])
+
+
+# Read from the rules rather than listed here, so widening a rule's prediction
+# widens the analysis with no second edit, and the two cannot disagree once the
+# numbers are visible.
+_PREDICTED = {rule.rule_id: rule.needs_enclosing_function for rule in ALL_RULES}
+
+
+def split_by_prediction(
+    entries: Sequence[Mapping[str, Any]],
+) -> tuple[list[Mapping[str, Any]], list[Mapping[str, Any]]]:
+    """Entries the wider context is predicted to help, and the control group.
+
+    The control group is what lets this experiment answer its own strongest
+    objection. If an adjudicator grows more confident whenever it is shown more
+    text, the effect says nothing about context being the right context. A set of
+    findings predicted not to move separates those two explanations: a rule
+    decided by the object a value is declared in does not need the path that
+    reaches it, so the enclosing function should add nothing.
+
+    The prediction is read off the rules, which recorded it before this
+    experiment existed and for unrelated reasons. That ordering matters more than
+    it looks: a hypothesis registered independently of the data cannot have been
+    chosen to fit it.
+
+    An unknown rule raises rather than defaulting. Defaulting would file a taint
+    rule nobody wired up into the group that must stay clean for the placebo to
+    mean anything, and the experiment would report a weaker effect for a reason
+    nobody could see.
+    """
+    predicted: list[Mapping[str, Any]] = []
+    control: list[Mapping[str, Any]] = []
+    for entry in entries:
+        rule_id = str(entry["rule_id"])
+        if rule_id not in _PREDICTED:
+            raise KeyError(f"no rule declares {rule_id}, so its prediction is unknown")
+        (predicted if _PREDICTED[rule_id] else control).append(entry)
+    return predicted, control

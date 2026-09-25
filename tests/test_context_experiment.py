@@ -142,3 +142,54 @@ def test_an_entry_with_no_function_is_not_suspect() -> None:
     from evals.harness.experiment import suspect_functions
 
     assert suspect_functions([{"entry_id": "a", "context": "x" * 100}]) == []
+
+
+def test_entries_split_into_the_predicted_and_the_control_group() -> None:
+    """The partition is derived from the rules, not written out here.
+
+    Which rules a wider context is predicted to help is recorded on the rules
+    themselves, for reasons that predate this experiment: a taint rule asks
+    whether a value an assistant supplies reaches a sink, and that question
+    spans the function. Deriving the split means widening the prediction
+    requires changing the rule, and the analysis follows - rather than two lists
+    that can disagree once the numbers are visible.
+    """
+    from evals.harness.experiment import split_by_prediction
+
+    entries = [
+        {"entry_id": "a", "rule_id": "SHELL-EXEC-UNSAFE"},
+        {"entry_id": "b", "rule_id": "PATH-TRAVERSAL"},
+        {"entry_id": "c", "rule_id": "UNICODE-CONCEAL"},
+        {"entry_id": "d", "rule_id": "SCOPE-OVERBROAD"},
+    ]
+
+    predicted, control = split_by_prediction(entries)
+
+    assert {e["entry_id"] for e in predicted} == {"a", "b"}
+    assert {e["entry_id"] for e in control} == {"c", "d"}
+
+
+def test_the_prediction_comes_from_the_rules_themselves() -> None:
+    """A test that iterates the declaration rather than restating it, so
+    widening a rule's prediction cannot leave the analysis behind."""
+    from analyzer.rules import ALL_RULES
+    from evals.harness.experiment import split_by_prediction
+
+    entries = [{"entry_id": rule.rule_id, "rule_id": rule.rule_id} for rule in ALL_RULES]
+    predicted, control = split_by_prediction(entries)
+
+    expected = {r.rule_id for r in ALL_RULES if r.needs_enclosing_function}
+    assert {e["entry_id"] for e in predicted} == expected
+    assert len(predicted) + len(control) == len(ALL_RULES)
+
+
+def test_an_unknown_rule_is_refused_rather_than_filed_as_control() -> None:
+    """Defaulting would put a taint rule nobody wired up into the group
+    predicted not to move, which is the group that has to stay clean for the
+    placebo to mean anything."""
+    import pytest
+
+    from evals.harness.experiment import split_by_prediction
+
+    with pytest.raises(KeyError):
+        split_by_prediction([{"entry_id": "a", "rule_id": "NO-SUCH-RULE"}])

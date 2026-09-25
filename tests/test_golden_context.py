@@ -494,3 +494,52 @@ def test_the_enclosing_context_carries_the_flagged_line_s_position_within_it() -
     assert enclosing is not None
     lines = enclosing.text.splitlines()
     assert lines[enclosing.flagged_offset] == "  return execSync(`ls ${userInput}`).toString();"
+
+
+def test_a_non_taint_finding_inside_a_function_still_gets_the_second_context(
+    tmp_path: Path,
+) -> None:
+    """The experiment's control group, and the reason it can answer its own
+    strongest objection.
+
+    If a wider context raises an adjudicator's confidence, the dull explanation
+    is that more text simply reads as more evidence. The way to rule that out is
+    a set of findings the manipulation is predicted *not* to help: a rule decided
+    by the object a value is declared in, not by the path that reaches it. Those
+    entries need the second context captured so the prediction can be tested,
+    even though the prediction is that nothing moves.
+
+    Which rules are expected to move is already recorded on the rules
+    themselves, written for unrelated reasons before this experiment existed, so
+    the hypothesis is registered independently of the data rather than chosen
+    once the numbers were visible. That makes it an analysis-time distinction,
+    not a capture-time one.
+    """
+    source = "\n".join(
+        ["function registerTool(server) {"]
+        + [f"  const noise{n} = {n};" for n in range(3)]
+        + ['  server.addTool({ name: "read", origin: "*" });', "}"]
+    )
+    line = source.splitlines().index('  server.addTool({ name: "read", origin: "*" });') + 1
+    finding = Finding(
+        server_id="a/one",
+        commit_sha="a" * 40,
+        rule_id="SCOPE-OVERBROAD",
+        severity="high",
+        confidence="low",
+        location=Location(file="index.ts", line=line),
+        evidence='origin: "*"',
+    )
+
+    result = capture_for_findings(
+        [finding],
+        repo_urls={"a/one": "https://github.com/a/one"},
+        clone=_clone_writing(source),
+        scan=lambda root, server_id, commit_sha: ScanReport(findings=(finding,), skipped=()),
+        workdir=tmp_path,
+    )
+
+    assert finding.finding_id in result.functions, (
+        "a control entry needs the second context, or the placebo cannot be tested"
+    )
+    assert "registerTool" in result.functions[finding.finding_id].text
