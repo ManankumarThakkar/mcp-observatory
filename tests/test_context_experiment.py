@@ -277,3 +277,44 @@ def test_the_effect_is_reported_with_its_direction_split_not_only_a_p_value() ->
     effect = paired_decisiveness(entries)
 
     assert (effect.more_decisive, effect.less_decisive, effect.tied) == (2, 1, 0)
+
+
+def test_a_probability_is_recorded_under_the_condition_it_was_asked_in() -> None:
+    """Two conditions write to one entry, so the condition has to be part of
+    where the answer lands. Without it the second run would overwrite the first
+    and the comparison would have one arm."""
+    from evals.harness.experiment import record_probabilities
+
+    entries: list[dict[str, object]] = [{"entry_id": "a", "probabilities": {"window": 0.52}}]
+
+    updated = record_probabilities(entries, "function", {"a": 0.95})
+
+    assert updated[0]["probabilities"] == {"window": 0.52, "function": 0.95}
+
+
+def test_an_entry_the_spend_guard_skipped_records_nothing() -> None:
+    """The one failure that would be invisible. A call never made must not
+    become 0.0, which reads downstream as a confident "not real" and would drag
+    the measured effect toward whatever the guard happened to cut off."""
+    from evals.harness.experiment import record_probabilities
+
+    entries: list[dict[str, object]] = [{"entry_id": "a", "probabilities": {}}]
+
+    updated = record_probabilities(entries, "window", {"a": None})
+
+    assert updated[0]["probabilities"] == {}
+
+
+def test_only_entries_carrying_a_condition_s_context_are_eligible_for_it() -> None:
+    """Asking for a context an entry lacks is refused by design, so the runner
+    has to select before it asks rather than catch afterwards."""
+    from evals.harness.experiment import eligible
+
+    entries = [
+        {"entry_id": "a", "context": "w", "flagged_offset": 0,
+         "context_function": "f", "flagged_offset_function": 0},
+        {"entry_id": "b", "context": "w", "flagged_offset": 0},
+    ]
+
+    assert [e["entry_id"] for e in eligible(entries, "window")] == ["a", "b"]
+    assert [e["entry_id"] for e in eligible(entries, "function")] == ["a"]

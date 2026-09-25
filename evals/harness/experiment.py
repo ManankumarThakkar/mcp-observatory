@@ -22,6 +22,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from analyzer.rules import ALL_RULES
+from analyzer.triage.base import CONTEXT_FIELDS
 from evals.golden.label import CONDITIONS
 
 # The two labels that count as a decision. Anything else is the labeller saying
@@ -296,3 +297,56 @@ def _sign_test(more: int, less: int) -> float:
     ways = sum(math.comb(untied, i) for i in range(smaller + 1))
     tail = ways / float(2**untied)
     return min(1.0, 2.0 * tail)
+
+
+def eligible(
+    entries: Sequence[Mapping[str, Any]], condition: str
+) -> list[Mapping[str, Any]]:
+    """The entries that carry the context a condition needs.
+
+    Selected before asking rather than caught afterwards, because projecting an
+    entry onto a context it does not have raises on purpose: a silent fallback
+    to the window would record two observations of one context. A rule whose
+    findings sit at the top level of a file has no enclosing function, so the
+    two conditions legitimately have different eligible sets, and the paired
+    comparison takes the intersection by construction.
+    """
+    field_names = CONTEXT_FIELDS[condition]
+    return [
+        entry
+        for entry in entries
+        if all(entry.get(name) is not None for name in field_names)
+    ]
+
+
+def record_probabilities(
+    entries: Sequence[Mapping[str, Any]],
+    condition: str,
+    results: Mapping[str, float | None],
+) -> list[dict[str, Any]]:
+    """Write one condition's answers onto the entries without disturbing the other.
+
+    Keyed by condition because two runs write to one entry, and a flat field
+    would let the second overwrite the first and leave the comparison with one
+    arm.
+
+    An entry the spend guard never asked about records nothing. That is the
+    distinction worth protecting: a missing answer stored as 0.0 is
+    indistinguishable downstream from a confident "not real", and it would drag
+    the measured effect toward wherever the guard happened to stop.
+    """
+    if condition not in CONTEXT_FIELDS:
+        raise ValueError(
+            f"condition must be one of {', '.join(CONTEXT_FIELDS)}, got {condition!r}"
+        )
+
+    updated = []
+    for entry in entries:
+        fresh = dict(entry)
+        probabilities = dict(fresh.get("probabilities") or {})
+        answer = results.get(str(fresh["entry_id"]))
+        if answer is not None:
+            probabilities[condition] = answer
+        fresh["probabilities"] = probabilities
+        updated.append(fresh)
+    return updated
