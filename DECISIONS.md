@@ -317,9 +317,16 @@ triage layer, so it is a design input rather than an optimisation.
 shorter than that, in which case caching silently does nothing and the cache
 hit rate is zero. Measure `usage.cache_read_input_tokens` rather than assuming.
 
-*Measure tokens, do not estimate them.* `messages.count_tokens` is free and
-exact. The numbers above are arithmetic on real prices applied to estimated
-token counts, and the estimate is the weak half.
+*Measured 2026-09-25, replacing the estimate below.* Adjudication costs
+**$0.000294 per decision**, measured over all 288 golden-set entries at $0.0847
+total, median latency 715 ms. A first full pass over the corpus is about $3.50
+and later passes approach zero through the cache.
+
+The figures that follow were arithmetic on real prices applied to *estimated*
+token counts, and the estimate was the weak half. They are kept because the
+reasoning about batching and caching still holds, and because a decision log
+that quietly replaced its own numbers would hide how far an estimate can be from
+a measurement.
 
 **What this changes about sampling.** A full corpus scan of 25,977 servers is
 roughly 52,000 adjudications, about $28 batched, against a stated ceiling of
