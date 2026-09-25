@@ -19,12 +19,12 @@ _STYLE = """
 :root {
   color-scheme: light dark;
   --bg: #fbfbfa; --panel: #fff; --ink: #16161a; --muted: #5c5f66;
-  --line: #e4e4e1; --accent: #1f6feb; --warn: #9a3412; --ok: #166534;
+  --line: #d4d4cf; --accent: #1f6feb; --warn: #9a3412; --ok: #166534;
 }
 @media (prefers-color-scheme: dark) {
   :root {
     --bg: #0d0d0f; --panel: #16161a; --ink: #ececee; --muted: #9b9ba3;
-    --line: #26262c; --accent: #6aa8ff; --warn: #fdba74; --ok: #86efac;
+    --line: #353540; --accent: #6aa8ff; --warn: #fdba74; --ok: #86efac;
   }
 }
 * { box-sizing: border-box; }
@@ -63,6 +63,16 @@ tbody tr:hover { background: color-mix(in oklab, var(--panel) 70%, var(--accent)
 code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .875em; }
 .zero { color: var(--muted); }
 .scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.skip {
+  position: absolute; left: -9999px; top: 0;
+  background: var(--panel); color: var(--ink); padding: .75rem 1rem;
+  border: 1px solid var(--line); border-radius: 0 0 8px 0; z-index: 10;
+}
+.skip:focus { left: 0; }
+.bar { width: 100%; height: 2.5rem; display: block; margin: .25rem 0 .5rem; }
+.legend { display: flex; flex-wrap: wrap; gap: 1rem; margin: 0; padding: 0; list-style: none; font-size: .875rem; }
+.legend li { display: flex; align-items: center; gap: .5rem; }
+.swatch { width: .875rem; height: .875rem; border-radius: 3px; flex: 0 0 auto; }
 a { color: var(--accent); }
 a:focus-visible, :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 footer { margin-top: 3.5rem; padding-top: 1.25rem; border-top: 1px solid var(--line); color: var(--muted); font-size: .875rem; }
@@ -86,6 +96,42 @@ def _languages(languages: tuple[str, ...]) -> str:
     if {"typescript", "tsx"} <= set(languages):
         return "TypeScript and JavaScript"
     return ", ".join(sorted(languages))
+
+
+def _disclosure_bar(site: SiteData) -> str:
+    """One bar: how much of what was found is published, and how much is not.
+
+    The only chart on the page, because it is the only ratio a reader cannot
+    reconstruct at a glance from the figures above it and the only one that
+    changes how the rest of the page should be read. Four fifths of the
+    findings are withheld, and a page of tables makes that a number rather than
+    a shape.
+
+    Inline SVG with no library. It is two rectangles; a charting dependency
+    would add a way for the page to fail without adding anything a reader sees.
+
+    `role="img"` and an accessible name, because an SVG without them is
+    decoration to a screen reader - and a reader who cannot see it still gets
+    every number from the text beside it, which is why the chart is a second
+    presentation of the figures rather than the only one.
+    """
+    found = max(site.findings_found, 1)
+    published = site.findings_published / found * 100
+    label = (
+        f"{_n(site.findings_published)} of {_n(site.findings_found)} findings published, "
+        f"{_n(site.withheld)} withheld pending disclosure"
+    )
+    return f"""  <svg class="bar" viewBox="0 0 100 8" preserveAspectRatio="none"
+       role="img" aria-label="{escape(label, quote=True)}">
+    <rect x="0" y="0" width="100" height="8" rx="1" fill="var(--muted)"></rect>
+    <rect x="0" y="0" width="{published:.2f}" height="8" rx="1" fill="var(--accent)"></rect>
+  </svg>
+  <ul class="legend">
+    <li><span class="swatch" style="background: var(--accent)"></span>
+        {_n(site.findings_published)} published ({published:.0f}%)</li>
+    <li><span class="swatch" style="background: var(--muted)"></span>
+        {_n(site.withheld)} withheld pending disclosure ({100 - published:.0f}%)</li>
+  </ul>"""
 
 
 def render_overview(site: SiteData) -> str:
@@ -141,6 +187,7 @@ def render_overview(site: SiteData) -> str:
 <style>{_STYLE}</style>
 </head>
 <body>
+<a class="skip" href="#main">Skip to content</a>
 <div class="wrap">
 <header>
   <h1>MCP Security Observatory</h1>
@@ -149,7 +196,7 @@ def render_overview(site: SiteData) -> str:
   output and published beside the results.</p>
 </header>
 
-<main>
+<main id="main">
   <h2>What was examined</h2>
   <ul class="chain">
     <li><span class="k">Known repositories</span><div class="v">{_n(site.corpus)}</div>
@@ -185,6 +232,8 @@ def render_overview(site: SiteData) -> str:
     rather than a confirmed problem.</p>
   </div>
 
+{_disclosure_bar(site)}
+
   <div class="callout">
     <p><strong>{_n(site.withheld)} of {_n(site.findings_found)} findings are not shown.</strong>
     Every high and critical finding is withheld pending private disclosure to its maintainer,
@@ -197,7 +246,7 @@ def render_overview(site: SiteData) -> str:
   <table>
     <caption>A decision is one thing a maintainer would fix. One decision often appears on
     several lines, so rows are shown separately rather than counted as problems.</caption>
-    <thead><tr><th>Rule</th><th class="n">Decisions</th><th class="n">Servers</th><th class="n">Rows</th></tr></thead>
+    <thead><tr><th scope="col">Rule</th><th scope="col" class="n">Decisions</th><th scope="col" class="n">Servers</th><th scope="col" class="n">Rows</th></tr></thead>
     <tbody>
 {rules}
     </tbody>
@@ -211,7 +260,7 @@ def render_overview(site: SiteData) -> str:
   <table>
     <caption>Every aggregate figure on this page is bounded by this table. A percentage
     derived from TypeScript is never presented as an ecosystem-wide one.</caption>
-    <thead><tr><th>Rule</th><th>Detects</th><th>Examines</th></tr></thead>
+    <thead><tr><th scope="col">Rule</th><th scope="col">Detects</th><th scope="col">Examines</th></tr></thead>
     <tbody>
 {coverage}
     </tbody>
@@ -223,7 +272,7 @@ def render_overview(site: SiteData) -> str:
   <table>
     <caption>One misconfiguration set on many response paths. Counting the rows instead of
     the decisions would overstate these servers roughly twofold.</caption>
-    <thead><tr><th>Server</th><th>What the rule reported</th><th class="n">Lines</th></tr></thead>
+    <thead><tr><th scope="col">Server</th><th scope="col">What the rule reported</th><th scope="col" class="n">Lines</th></tr></thead>
     <tbody>
 {top}
     </tbody>
@@ -324,6 +373,7 @@ def _shell(title: str, body: str, *, depth: int = 0) -> str:
 <style>{_STYLE}</style>
 </head>
 <body>
+<a class="skip" href="#main">Skip to content</a>
 <div class="wrap">
 {body}
 <footer>
@@ -365,7 +415,7 @@ def render_findings(site: SiteData, *, repo_urls: dict[str, str]) -> str:
   appear here.</p>
 </header>
 
-<main>
+<main id="main">
   <div class="callout">
     <p><strong>Looking for your own server and not finding it?</strong> A repository can be
     registered under more than one name, and findings are published under one of them, so the
@@ -378,7 +428,7 @@ def render_findings(site: SiteData, *, repo_urls: dict[str, str]) -> str:
   <div class="scroll">
   <table>
     <caption>A decision is one thing to fix. Lines counts how many places it appears.</caption>
-    <thead><tr><th>Server</th><th class="n">Decisions</th><th class="n">Lines</th><th>Reported</th></tr></thead>
+    <thead><tr><th scope="col">Server</th><th scope="col" class="n">Decisions</th><th scope="col" class="n">Lines</th><th scope="col">Reported</th></tr></thead>
     <tbody>
 {rows}
     </tbody>
@@ -404,7 +454,7 @@ def render_server(server_id: str, site: SiteData, *, repo_urls: dict[str, str]) 
   <p class="lede">{_repo_cell(server_id, repo_urls)}</p>
 </header>
 
-<main>
+<main id="main">
   <div class="callout">
     <p><strong>This is not a clean bill of health.</strong> Only findings that cleared the
     disclosure gate appear below. Every high and critical finding is withheld pending private
@@ -416,7 +466,7 @@ def render_server(server_id: str, site: SiteData, *, repo_urls: dict[str, str]) 
   <h2>Published findings <span class="n">&mdash; {len(groups)} decision{"" if len(groups) == 1 else "s"}</span></h2>
   <div class="scroll">
   <table>
-    <thead><tr><th>What the rule reported</th><th class="n">Lines</th><th>Where</th><th>First seen</th></tr></thead>
+    <thead><tr><th scope="col">What the rule reported</th><th scope="col" class="n">Lines</th><th scope="col">Where</th><th scope="col">First seen</th></tr></thead>
     <tbody>
 {rows}
     </tbody>
