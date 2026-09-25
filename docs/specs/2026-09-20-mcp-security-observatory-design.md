@@ -250,29 +250,36 @@ passing it.
 - **Hosting:** Render static site, free tier.
 - **Storage:** the git repository. No database.
 - **Secrets:** `ANTHROPIC_API_KEY` and `GITHUB_TOKEN` as Actions secrets.
-- **Estimated run cost:** the first full scan is the only expensive one. At a
-  v1 target of ~1,000 servers averaging roughly two semantic findings each,
-  that is ~2,000 uncached triage calls of a few hundred tokens apiece - low
-  single-digit dollars on Haiku.
+- **Measured run cost, 2026-09-25.** Every figure here is measured rather than
+  estimated. What it replaces was arithmetic on real prices applied to guessed
+  token counts, and the guess was the weak half. Adjudication costs **$0.000294
+  per decision**, measured over all 288 golden-set entries at $0.0847 total,
+  median latency 715 ms. The corpus carries roughly **11,900** findings from the
+  two model-adjudicated rules, so a first full pass is about **$3.50**; later
+  passes approach zero, because the cache is keyed on what was actually sent and
+  an unchanged finding is never asked twice.
 - **Scanning and triage have different costs, and conflating them was an
-  error.** Scanning is cheap. Measured over 80 real repositories at eight
-  concurrent workers, the whole corpus of 35,050, both the registry census and
-  the code-search candidates, projects to **2.0 hours**, inside the six-hour
-  job limit. Sequential would be 9.5 hours and would not fit, which is why the
+  error.** Scanning is cheap. Measured over 1,643 real repositories at eight
+  concurrent workers rather than the 80 this was first projected from: a
+  2,000-repository sample takes 14 minutes, so the 21,492-repository census
+  projects to **3.1 hours** - inside the six-hour job limit, and half again the
+  earlier projection. Sequential would be 9.5 hours and would not fit, which is why the
   orchestrator is concurrent. Nothing about the scan requires sampling.
 - **Triage is the expensive part, and that is what samples.** A crawl on
   2026-09-21 found 21,356 distinct repositories against the ~1,000 in the v1
-  target. At two semantic findings each that is ~42,000 triage calls, well past
-  the 3,000-call spend guard below. So v1 scans everything and adjudicates a
+  target. Measured at 0.79 findings per server, of which the two
+  model-adjudicated rules are 0.56, that is roughly 11,900 triage calls - well
+  past the 3,000-call spend guard below, though at $0.000294 each that guard
+  stops a run at $0.88 of a $3.50 job, which inverts what it was sized to
+  protect. So v1 scans everything and adjudicates a
   **sample**, with the sampling method published alongside the results for the
   same reason the golden set's is (see `DECISIONS.md` D7). Subsequent nightly
   runs approach zero, because `finding_id` is deterministic and the cache
   absorbs every unchanged finding.
-- **The two-findings-per-server assumption is untested and probably high.** A
-  real scan of 71 reachable repositories produced 23 findings, about 0.32 each.
-  Only one of the five rules exists today, so that is a floor rather than a
-  forecast, but the estimate above should be re-derived from a measured rate
-  once the deeper rules land rather than carried forward.
+- **Measured at 0.79 findings per server, not the two this assumed.** A scan of
+  1,643 reachable repositories produced 1,296 findings across all five rules. An
+  earlier count of 71 repositories gave 0.32, which was a floor rather than a
+  forecast because only one rule existed then.
 - **Hard spend guard:** the triage layer enforces a configurable maximum of
   3,000 model calls per run. Exceeding it stops adjudication, marks the
   remainder `uncertain`, and completes the run rather than silently spending.

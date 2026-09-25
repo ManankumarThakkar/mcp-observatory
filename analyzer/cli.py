@@ -39,6 +39,7 @@ from analyzer.pipeline import (
 from analyzer.report.merge import utc_stamp
 from analyzer.report.page import write_site
 from analyzer.report.site import build_site_data, write_site_data
+from analyzer.report.trend import append_point, point_from_site
 from analyzer.scanner import scan_directory
 
 # A directory scanned in place was never cloned, so there is no commit to
@@ -79,6 +80,11 @@ DEFAULT_SAMPLE_SEED = 20260923
 # from the single source every time.
 DEFAULT_SITE_DATA = Path("web/site-data.json")
 DEFAULT_SITE_PAGE = Path("web/index.html")
+
+# The time series, and the only output of a nightly run that cannot be
+# regenerated: every other file here is derived from the current scan, while a
+# point for a night that has passed can never be measured again.
+DEFAULT_TREND_PATH = Path("data/trend.jsonl")
 
 # Published, and committed. Only findings that cleared the disclosure gate
 # reach here.
@@ -159,6 +165,16 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     site.add_argument(
         "--page", default=str(DEFAULT_SITE_PAGE), help="Where to write the overview page."
+    )
+    site.add_argument(
+        "--trend",
+        default=str(DEFAULT_TREND_PATH),
+        help="Append tonight's counts to this series, replacing any point for the same day.",
+    )
+    site.add_argument(
+        "--no-trend",
+        action="store_true",
+        help="Build the pages without recording a point. For a local preview.",
     )
 
     crawl = subcommands.add_parser(
@@ -465,6 +481,12 @@ def _site_command(args: argparse.Namespace) -> int:
     # them. A `fetch` from file:// is blocked as a cross-origin request in every
     # current browser, so a page that fetched would work on a host and be blank
     # for anyone who opened the file - including a reviewer handed the repo.
+    # Recorded before the pages are written, because it is the only output that
+    # cannot be regenerated: a point for a night that has passed can never be
+    # measured again, and a page can be rebuilt any time.
+    if not args.no_trend:
+        append_point(Path(args.trend), point_from_site(site))
+
     out_dir = Path(args.page).parent
     written = write_site(site, out_dir=out_dir, repo_urls=_published_repo_urls(Path(args.data_dir)))
 
