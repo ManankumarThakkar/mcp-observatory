@@ -9,7 +9,9 @@ from evals.golden.label import (
     apply_label,
     last_labelled,
     next_unlabelled,
+    observe,
     progress,
+    published_label,
     render,
 )
 
@@ -232,3 +234,59 @@ def test_an_unknown_labeller_is_refused() -> None:
     """Provenance with a free-text field is provenance nobody can filter on."""
     with pytest.raises(ValueError, match="labeller"):
         apply_label(ENTRIES, "g-0002", "true_positive", reason="x", by="committee")
+
+
+def test_a_judgement_is_an_observation_under_a_condition() -> None:
+    """The contribution is a comparison between two conditions, and the human
+    validation is a second labeller on the same entries. Both need a judgement
+    to carry who made it and what they were shown - a single `label` field can
+    represent neither.
+    """
+    updated = observe(ENTRIES, "g-0002", "true_positive",
+                      condition="window", reason="reachable", by="model")
+
+    assert updated[1]["observations"]["window"]["label"] == "true_positive"
+    assert updated[1]["observations"]["window"]["labelled_by"] == "model"
+
+
+def test_the_same_entry_holds_both_conditions_independently() -> None:
+    """The whole experiment is that these can differ. Storing one would make
+    the effect unmeasurable."""
+    entries = observe(ENTRIES, "g-0002", "unsure", condition="window",
+                      reason="origin not visible", by="model")
+    entries = observe(entries, "g-0002", "true_positive", condition="function",
+                      reason="parameter reaches the shell unquoted", by="model")
+
+    obs = entries[1]["observations"]
+    assert obs["window"]["label"] == "unsure"
+    assert obs["function"]["label"] == "true_positive"
+
+
+def test_a_human_observation_sits_beside_a_model_one_rather_than_replacing_it() -> None:
+    """Agreement between them is the figure to report, and overwriting would
+    destroy the thing being measured."""
+    entries = observe(ENTRIES, "g-0002", "true_positive", condition="function",
+                      reason="x", by="model")
+    entries = observe(entries, "g-0002", "false_positive", condition="function",
+                      reason="y", by="human")
+
+    obs = entries[1]["observations"]["function"]
+    assert obs["label"] == "false_positive", "the human judgement is the ground truth"
+    assert obs["superseded"]["label"] == "true_positive"
+    assert obs["superseded"]["labelled_by"] == "model"
+
+
+def test_an_unknown_condition_is_refused() -> None:
+    with pytest.raises(ValueError, match="condition"):
+        observe(ENTRIES, "g-0002", "true_positive", condition="vibes", reason="x", by="model")
+
+
+def test_the_published_label_prefers_a_human_and_the_richer_context() -> None:
+    """The benchmark publishes the best judgement available: a human over a
+    model, and the enclosing function over the window, because the narrow
+    window is the condition shown to be lossy."""
+    entries = observe(ENTRIES, "g-0002", "unsure", condition="window", reason="x", by="model")
+    assert published_label(entries[1]) == "unsure"
+
+    entries = observe(entries, "g-0002", "true_positive", condition="function", reason="y", by="model")
+    assert published_label(entries[1]) == "true_positive"

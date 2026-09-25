@@ -341,3 +341,44 @@ def test_an_enormous_function_is_still_bounded() -> None:
     assert captured is not None
     assert len(captured) < 20_000
     assert "execSync(cmd)" in captured
+
+
+def test_a_taint_entry_carries_both_contexts_for_the_comparison() -> None:
+    """The contribution is a controlled comparison: the same finding judged
+    from a line window and from its enclosing function. That is only possible
+    if both are captured from the same clone at the same commit - capturing
+    them in separate passes would let the repository move between them and
+    confound the condition with the code.
+    """
+    from evals.golden.context import both_contexts
+
+    # The signature sits more than a window away from the sink, which is the
+    # condition being tested: a body long enough that twelve lines either side
+    # cannot reach the parameter feeding the command.
+    source = "\n".join(
+        [f"// filler {n}" for n in range(20)]
+        + ["export function runTool(userInput: string): string {", "  const cmd = `ls ${userInput}`;"]
+        + [f"  const noise{n} = {n};" for n in range(20)]
+        + ["  return execSync(cmd).toString();", "}"]
+    )
+    flagged = source.splitlines().index("  return execSync(cmd).toString();") + 1
+
+    narrow, wide = both_contexts(source, flagged, suffix=".ts")
+
+    assert narrow is not None and wide is not None
+    assert "userInput" not in narrow, "the narrow window must not reach the signature"
+    assert "function runTool(userInput: string)" in wide
+
+
+def test_a_non_taint_entry_has_no_second_condition() -> None:
+    """UNICODE-CONCEAL and SCOPE-OVERBROAD are unchanged by the manipulation,
+    so carrying a second identical context would imply an experiment that was
+    not run on them."""
+    from evals.golden.context import both_contexts
+
+    source = "\n".join(f"line {n}" for n in range(1, 51))
+
+    narrow, wide = both_contexts(source, 25, suffix=".md")
+
+    assert narrow is not None
+    assert wide is None, "no enclosing function exists in a document"

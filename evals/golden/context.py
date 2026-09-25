@@ -142,6 +142,31 @@ def capture_for_judgement(
     return text
 
 
+def both_contexts(source: str, line: int, *, suffix: str) -> tuple[str | None, str | None]:
+    """The same finding under both judgement conditions.
+
+    Captured together from one clone at one commit. Capturing them in separate
+    passes would let the repository move between them, which would confound the
+    condition being tested with the code being judged - and the repositories in
+    this corpus move daily.
+
+    The second is None where no enclosing function exists, which is the honest
+    representation of a rule the manipulation does not apply to: a document has
+    no function, and carrying a duplicate of the window would imply an
+    experiment that was not run on it.
+    """
+    narrow = capture_context(source, line)
+
+    parsed = parse_source(source, suffix)
+    if parsed is None:
+        return narrow, None
+    node = _enclosing_function(parsed.tree.root_node, line)
+    if node is None:
+        return narrow, None
+    text = parsed.text(node)
+    return narrow, text if len(text) <= MAX_FUNCTION_CHARS else None
+
+
 def _enclosing_function(root: Node, line: int) -> Node | None:
     """The smallest function node containing a one-indexed line."""
     found: Node | None = None

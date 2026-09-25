@@ -29,6 +29,74 @@ LABELLERS: tuple[str, ...] = ("human", "model")
 # of them, and `b` because there will be slips.
 KEYS: Mapping[str, str] = {"y": "true_positive", "n": "false_positive", "u": "unsure"}
 
+# The two ways a taint finding can be presented to a judge. The comparison
+# between them is the experiment: `window` is twelve lines either side of the
+# flagged line, `function` is the function enclosing it.
+CONDITIONS: tuple[str, ...] = ("window", "function")
+
+
+def observe(
+    entries: Sequence[Mapping[str, Any]],
+    entry_id: str,
+    label: str,
+    *,
+    condition: str,
+    reason: str = "",
+    by: str = "human",
+) -> list[dict[str, Any]]:
+    """Record one judgement of one entry under one condition.
+
+    A judgement is an observation rather than a field, because two things need
+    to vary independently: what the judge was shown, and who the judge was. The
+    experiment compares conditions; the validation compares labellers. A single
+    `label` can represent neither.
+
+    A human observation supersedes a model one for the same condition rather
+    than overwriting it, because agreement between them is the figure to
+    report and an overwrite destroys the thing being measured.
+    """
+    if label not in LABELS:
+        raise ValueError(f"label must be one of {', '.join(LABELS)}, got {label!r}")
+    if condition not in CONDITIONS:
+        raise ValueError(f"condition must be one of {', '.join(CONDITIONS)}, got {condition!r}")
+    if by not in LABELLERS:
+        raise ValueError(f"labeller must be one of {', '.join(LABELLERS)}, got {by!r}")
+    if by == "model" and not reason.strip():
+        raise ValueError("a model label needs a reason, so the judgement can be audited")
+    if not any(entry["entry_id"] == entry_id for entry in entries):
+        raise KeyError(f"no entry {entry_id}")
+
+    def record(entry: Mapping[str, Any]) -> dict[str, Any]:
+        observations = dict(entry.get("observations") or {})
+        fresh: dict[str, Any] = {"label": label, "reason": reason, "labelled_by": by}
+        existing = observations.get(condition)
+        if existing is not None and existing.get("labelled_by") != by:
+            fresh["superseded"] = {k: v for k, v in existing.items() if k != "superseded"}
+        observations[condition] = fresh
+        return {**entry, "observations": observations}
+
+    return [
+        record(entry) if entry["entry_id"] == entry_id else dict(entry)
+        for entry in entries
+    ]
+
+
+def published_label(entry: Mapping[str, Any]) -> str | None:
+    """The best judgement available for one entry.
+
+    A human over a model, and the enclosing function over the window: the
+    narrow window is the condition measured to be lossy, so publishing a
+    judgement made under it when a richer one exists would publish the known
+    error rather than the correction.
+    """
+    observations = entry.get("observations") or {}
+    for condition in ("function", "window"):
+        seen = observations.get(condition)
+        if seen:
+            return str(seen["label"])
+    return None
+
+
 def next_unlabelled(entries: Sequence[Mapping[str, Any]]) -> Mapping[str, Any] | None:
     """The first entry still waiting for a judgement, or None if there is none."""
     return next((entry for entry in entries if entry.get("label") is None), None)
