@@ -112,23 +112,39 @@ def _literal(parsed: ParsedFile, node: Node) -> str | None:
     return inner.replace("\\\\", "\\")
 
 
+# Only a list is walked when resolving an origin. A list of allowed origins
+# containing `*` allows everything, just as a bare `*` does. An object is not a
+# list of origins: its properties belong to whatever it configures.
+#
+# This was `CONTAINER_NODES`, which included objects, and it produced a finding
+# on `origin: { type: String, unique: true }` - a Mongoose field definition in
+# a file with no CORS configuration anywhere in it. Found by reading published
+# output rather than by a fixture, which is the argument for reading published
+# output.
+ORIGIN_LIST_NODES = frozenset({"array"})
+
+
 def _wildcard_origin(parsed: ParsedFile, node: Node) -> bool:
     """Whether this value allows every origin.
 
-    Walks containers, because a list of allowed origins containing `*` allows
-    everything just as a bare `*` does.
+    `true` counts only as the value itself, never nested inside one. `cors({
+    origin: true })` reflects whatever origin asked; `origin: { type: String,
+    unique: true }` is a schema field that happens to contain the word, and
+    reporting it says the server accepts any origin when nothing in the file
+    configures origins at all.
     """
+    if node.type == REFLECTS_EVERY_ORIGIN:
+        return True
+
     stack = [node]
     while stack:
         current = stack.pop()
-        if current.type == REFLECTS_EVERY_ORIGIN:
-            return True
         literal = _literal(parsed, current)
         if literal is not None:
             if literal == WILDCARD_ORIGIN:
                 return True
             continue
-        if current.type in CONTAINER_NODES:
+        if current.type in ORIGIN_LIST_NODES:
             stack.extend(current.named_children)
     return False
 

@@ -211,3 +211,39 @@ def test_the_literal_string_true_is_not_a_wildcard_origin() -> None:
     described it in the evidence as `*`, which was not on the line at all.
     """
     assert _analyze('res.setHeader("Access-Control-Allow-Origin", "true");\n') == []
+
+
+def test_a_schema_field_named_origin_is_not_a_wildcard_origin() -> None:
+    """Found in published output, not in a fixture.
+
+    `origin: { type: String, unique: true }` is a Mongoose field definition.
+    The rule walked into the object, found `true`, and reported "accepts any
+    origin" - on a file with no CORS configuration in it at all. `true` means
+    "reflect every origin" only when it IS the value, never when it is a
+    property of some other object that happens to be the value.
+    """
+    source = """
+const userSchema = new Schema({
+  email: { type: String, required: true },
+  origin: { type: String, unique: true },
+  host: { type: String, default: true },
+});
+"""
+
+    assert _analyze(source) == []
+
+
+def test_a_bare_true_origin_is_still_a_wildcard() -> None:
+    """The narrowing must not cost the real detection: `cors({ origin: true })`
+    reflects whatever origin asked, which is the whole point of the rule."""
+    findings = _analyze("app.use(cors({ origin: true }));")
+
+    assert [f.evidence for f in findings] == ["accepts any origin (true)"]
+
+
+def test_a_wildcard_inside_a_list_of_origins_is_still_found() -> None:
+    """A list is a list of origins, so a `*` in it allows everything. That is
+    different from an object, whose properties are not origins."""
+    findings = _analyze('app.use(cors({ origin: ["https://a.test", "*"] }));')
+
+    assert len(findings) == 1
