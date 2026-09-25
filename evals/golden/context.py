@@ -1,5 +1,6 @@
 """The source window a finding is judged from, captured once for everyone."""
 
+import shutil
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -7,6 +8,7 @@ from pathlib import Path
 from analyzer.fetcher.clone import CloneTooLarge, FetchError
 from analyzer.models import Finding
 from analyzer.orchestrator import UNREACHABLE_ERRORS, CloneFn, ScanFn
+from analyzer.scanner import ScanReport
 
 # Exactly the failures that mean "this repository cannot be read", and nothing
 # else. Deliberately not a blind `except Exception`: the orchestrator catches
@@ -119,31 +121,47 @@ def capture_for_findings(
         try:
             cloned = clone(repo_urls[server_id], destination)
             report = scan(cloned.path, server_id, cloned.commit_sha)
+            _capture_from(cloned.path, group, report, result)
         except UNREADABLE as exc:
             for finding in group:
                 result.dropped[finding.finding_id] = f"{type(exc).__name__}: {exc}"
-            continue
-
-        still_found = {fresh.finding_id for fresh in report.findings}
-        for finding in group:
-            if finding.finding_id not in still_found:
-                result.dropped[finding.finding_id] = (
-                    "the current code no longer produces this finding, so the window "
-                    "at this line is not the code that was flagged"
-                )
-                continue
-
-            path = cloned.path / finding.location.file
-            try:
-                source = path.read_text(encoding="utf-8", errors="replace")
-            except OSError as exc:
-                result.dropped[finding.finding_id] = f"unreadable: {exc}"
-                continue
-
-            captured = capture_context(source, finding.location.line)
-            if captured is None:
-                result.dropped[finding.finding_id] = "line is past the end of the file"
-                continue
-            result.contexts[finding.finding_id] = captured
+        finally:
+            # Released before the next repository is fetched. Keeping them all
+            # made peak disk the sum of every repository rather than the largest
+            # single one, which filled a disk part-way through a re-draw. In
+            # `finally`, because the failure path is the one that fills a disk:
+            # it is the path taken by whatever is wrong with the repository.
+            shutil.rmtree(destination, ignore_errors=True)
 
     return result
+
+
+def _capture_from(
+    root: Path,
+    group: list[Finding],
+    report: ScanReport,
+    result: CaptureResult,
+) -> None:
+    """Take each finding's window from a clone that is about to be deleted."""
+    still_found = {fresh.finding_id for fresh in report.findings}
+    for finding in group:
+        if finding.finding_id not in still_found:
+            result.dropped[finding.finding_id] = (
+                "the current code no longer produces this finding, so the window "
+                "at this line is not the code that was flagged"
+            )
+            continue
+
+        path = root / finding.location.file
+        try:
+            source = path.read_text(encoding="utf-8", errors="replace")
+        except OSError as exc:
+            result.dropped[finding.finding_id] = f"unreadable: {exc}"
+            continue
+
+        captured = capture_context(source, finding.location.line)
+        if captured is None:
+            result.dropped[finding.finding_id] = "line is past the end of the file"
+            continue
+        result.contexts[finding.finding_id] = captured
+

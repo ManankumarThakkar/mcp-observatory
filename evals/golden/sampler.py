@@ -32,6 +32,30 @@ PER_RULE_TARGET = 60
 UNKNOWN_LANGUAGE = "other"
 
 
+def live_findings(records: Sequence[Mapping[str, Any]]) -> list[Mapping[str, Any]]:
+    """Only the findings the most recent scan actually produced.
+
+    The history is cumulative by design: `merge_findings` keeps a finding
+    absent from one run, because a server that could not be checked is not a
+    server that got fixed. That is right for a trend and wrong for a golden
+    set, which has to measure the scanner as it is now.
+
+    Measured after a TOOL-DESC-INJECTION fix on 2026-09-25: 175 of 602 findings
+    in the history were no longer produced. Drawing sixty from that picks about
+    seventeen the capture then refuses, so the sample comes up short of its
+    per-rule target - silently, and concentrated in whichever rule was most
+    recently corrected, which is exactly the rule whose precision the fix was
+    meant to change.
+
+    `last_seen` rather than a date argument, because the caller should not have
+    to know when the last scan ran to ask for its output.
+    """
+    if not records:
+        return []
+    latest = max(str(record["last_seen"]) for record in records)
+    return [record for record in records if str(record["last_seen"]) == latest]
+
+
 def stratified_sample(
     findings: Sequence[Finding],
     *,
@@ -173,11 +197,12 @@ def draw_golden_set(
     replacing it. Labelling is hours of a person's time and a re-draw that
     discarded it would be the most expensive kind of silent failure here.
     """
-    findings = [
-        Finding.from_dict(json.loads(line))
+    records = [
+        json.loads(line)
         for line in history_path.read_text(encoding="utf-8").splitlines()
         if line.strip()
     ]
+    findings = [Finding.from_dict(record) for record in live_findings(records)]
     existing: list[dict[str, Any]] = []
     if entries_path.exists():
         existing = [
