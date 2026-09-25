@@ -254,3 +254,70 @@ def test_a_failed_crawl_writes_no_index_either(tmp_path: Path) -> None:
         )
 
     assert not index.exists()
+
+
+def test_a_crawl_without_code_search_refuses_to_erase_the_sample_section(
+    tmp_path: Path,
+) -> None:
+    """The committed coverage document holds the 97%-unregistered figure, which
+    only a crawl run with code search can produce. A crawl run without it
+    rendered a document with that section absent and wrote it over the top,
+    deleting a published finding with no warning.
+
+    Caught once by reading a diff before committing. That stops being a control
+    the moment anything runs unattended, which is the point of fixing it before
+    the nightly job exists.
+    """
+    summary = tmp_path / "coverage.md"
+    summary.write_text(
+        "# Coverage\n\nCrawled at: 2026-09-01T00:00:00Z\n\n"
+        "## Beyond the registry\n\n**13,291 of 13,694** repositories appear nowhere.\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="Beyond the registry"):
+        run_crawl(
+            fetch=lambda url: PAGE,
+            now=lambda: FIXED_NOW,
+            summary_path=summary,
+            corpus_path=tmp_path / "corpus.json",
+            index_path=tmp_path / "index.jsonl",
+        )
+
+    assert "13,291" in summary.read_text(encoding="utf-8")
+
+
+def test_a_crawl_with_code_search_may_replace_the_sample_section(tmp_path: Path) -> None:
+    """The guard is against losing a section, not against updating one."""
+    summary = tmp_path / "coverage.md"
+    summary.write_text(
+        "# Coverage\n\n## Beyond the registry\n\nold numbers\n", encoding="utf-8"
+    )
+
+    run_crawl(
+        fetch=lambda url: PAGE,
+        now=lambda: FIXED_NOW,
+        summary_path=summary,
+        corpus_path=tmp_path / "corpus.json",
+        index_path=tmp_path / "index.jsonl",
+        search=lambda query, page: {"items": [{"repository": {"full_name": "brand/new"}}]},
+        search_requests=1,
+    )
+
+    written = summary.read_text(encoding="utf-8")
+    assert "Beyond the registry" in written
+    assert "old numbers" not in written
+
+
+def test_a_first_crawl_writes_whatever_it_produced(tmp_path: Path) -> None:
+    """With no existing document there is nothing to lose, and refusing would
+    make the first run of the tool fail."""
+    run_crawl(
+        fetch=lambda url: PAGE,
+        now=lambda: FIXED_NOW,
+        summary_path=tmp_path / "coverage.md",
+        corpus_path=tmp_path / "corpus.json",
+        index_path=tmp_path / "index.jsonl",
+    )
+
+    assert (tmp_path / "coverage.md").exists()

@@ -25,6 +25,17 @@ FINDINGS_FILE = "findings.jsonl"
 SARIF_FILE = "findings.sarif"
 SUMMARY_FILE = "summary.json"
 
+# The repository behind each server that has something published. Findings
+# carry a server_id, which is a registry name and need not resemble the
+# repository: one published as `com.arcandledger/tax-tools` lives at a GitHub
+# path nobody would guess. A maintainer recognises their repository, so the id
+# alone makes their own finding hard for them to identify.
+#
+# Only servers with published findings appear. Listing one whose findings are
+# all withheld would name it in public output while the gate is holding those
+# findings back.
+SERVERS_FILE = "servers.json"
+
 # The full history, including findings the gate is withholding. Not published,
 # because the directory above is committed to a public repository and a
 # withheld finding written there is a disclosed one.
@@ -46,6 +57,25 @@ COLLAPSE_RATIO = 0.5
 
 class CollapsedRun(Exception):
     """Raised when a run covered too little of the corpus to publish."""
+
+
+@dataclass(frozen=True)
+class Intake:
+    """How the scanned set was chosen, so the published figures have a denominator.
+
+    A page stating "1,643 servers scanned" invites exactly one question, and
+    without this the published data cannot answer it. The chain is corpus,
+    then sampled, then scanned, then skipped and failed, and each step is a
+    number a reader can check against the one before it.
+
+    `sampled` and `seed` are None for a full-corpus scan rather than equal to
+    the corpus. "We sampled 21,492 of 21,492" invites a reader to look for a
+    sampling method that was not used; the absence is the honest statement.
+    """
+
+    corpus: int
+    sampled: int | None = None
+    seed: int | None = None
 
 
 @dataclass(frozen=True)
@@ -103,6 +133,7 @@ def run_pipeline(
     disclosure_records: Mapping[str, DisclosureRecord],
     now: datetime,
     tool_version: str,
+    intake: Intake,
     validate: ValidateFn = looks_like_server,
     collapse_ratio: float = COLLAPSE_RATIO,
 ) -> PipelineResult:
@@ -123,6 +154,10 @@ def run_pipeline(
     # one, so it has to exist before the first worker starts. Creating it here
     # rather than requiring the caller to means a fresh checkout runs.
     workdir.mkdir(parents=True, exist_ok=True)
+    # Materialised because it is an Iterable and is read twice: once by the
+    # scan and once to name the repositories of whatever gets published. A
+    # generator would scan normally and then publish an empty server list.
+    records = list(records)
     outcomes = scan_all(
         records, clone=clone, scan=scan, workdir=workdir, validate=validate
     )
@@ -160,6 +195,11 @@ def run_pipeline(
         now=now,
         tool_version=tool_version,
     )
+    _write_servers(
+        data_dir / SERVERS_FILE,
+        {record.server_id: record.repo_url for record in records},
+        data_dir / FINDINGS_FILE,
+    )
 
     result = PipelineResult(
         scanned=scanned,
@@ -168,8 +208,37 @@ def run_pipeline(
         published=published_count,
         withheld=counts["withheld"] + counts["opted_out"],
     )
-    _write_summary(summary_path, result, counts, stamp, tool_version)
+    _write_summary(summary_path, result, counts, stamp, tool_version, intake)
     return result
+
+
+def _write_servers(path: Path, repo_urls: Mapping[str, str], findings_path: Path) -> None:
+    """Name the repository behind every server that has something published.
+
+    Read back from the file just written rather than from the gate's return
+    value, so this cannot list a server the gate withheld: the published file
+    is the definition of what is public, and deriving the list from anything
+    else is a second definition that could disagree with it.
+    """
+    published = {
+        json.loads(line)["server_id"]
+        for line in findings_path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    }
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(
+            [
+                {"server_id": server_id, "repo_url": repo_urls[server_id]}
+                for server_id in sorted(published)
+                if server_id in repo_urls
+            ],
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
 
 
 def _publish(
@@ -322,6 +391,7 @@ def _write_summary(
     counts: Mapping[str, int],
     stamp: str,
     tool_version: str,
+    intake: Intake,
 ) -> None:
     """Publish the numbers even when the findings behind them are withheld.
 
@@ -332,6 +402,10 @@ def _write_summary(
     payload: dict[str, Any] = {
         "generated_at": stamp,
         "tool_version": tool_version,
+        # The denominator, and how the scanned set was chosen from it.
+        "corpus": intake.corpus,
+        "sampled": intake.sampled,
+        "sample_seed": intake.seed,
         "scanned": result.scanned,
         "skipped": result.skipped,
         "failed": result.failed,

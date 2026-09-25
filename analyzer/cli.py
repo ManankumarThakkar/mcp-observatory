@@ -28,8 +28,16 @@ from analyzer.crawler.sample import sample_index
 from analyzer.errors import InputError
 from analyzer.fetcher.clone import FetchError, shallow_clone
 from analyzer.orchestrator import CloneFn, ScanFn
-from analyzer.pipeline import CollapsedRun, PipelineResult, publish_from_history, run_pipeline
+from analyzer.pipeline import (
+    SERVERS_FILE,
+    CollapsedRun,
+    Intake,
+    PipelineResult,
+    publish_from_history,
+    run_pipeline,
+)
 from analyzer.report.merge import utc_stamp
+from analyzer.report.page import write_site
 from analyzer.report.site import build_site_data, write_site_data
 from analyzer.scanner import scan_directory
 
@@ -70,6 +78,7 @@ DEFAULT_SAMPLE_SEED = 20260923
 # stale against the findings it describes, and the deploy workflow rebuilds it
 # from the single source every time.
 DEFAULT_SITE_DATA = Path("web/site-data.json")
+DEFAULT_SITE_PAGE = Path("web/index.html")
 
 # Published, and committed. Only findings that cleared the disclosure gate
 # reach here.
@@ -148,6 +157,9 @@ def _build_parser() -> argparse.ArgumentParser:
     site.add_argument(
         "--out", default=str(DEFAULT_SITE_DATA), help="Where to write the page's data."
     )
+    site.add_argument(
+        "--page", default=str(DEFAULT_SITE_PAGE), help="Where to write the overview page."
+    )
 
     crawl = subcommands.add_parser(
         "crawl", help="Read the registry and record what we will scan."
@@ -203,14 +215,47 @@ def run_crawl(
     if search is not None:
         coverage = replace(coverage, sample=_search_sample(search, search_requests, moment))
 
+    rendered = render_coverage(coverage)
+    _refuse_to_lose_a_section(summary_path, rendered)
     summary_path.parent.mkdir(parents=True, exist_ok=True)
-    summary_path.write_text(render_coverage(coverage), encoding="utf-8")
+    summary_path.write_text(rendered, encoding="utf-8")
     write_corpus(corpus_path, coverage)
     # The scan's input, and the only one of the three a later command reads.
     # Collapsed to one record per repository, because the orchestrator clones
     # per record and the coverage summary has already reported that saving.
     write_server_index(index_path, collapse_to_index(crawl.records))
     return coverage
+
+
+def _refuse_to_lose_a_section(path: Path, rendered: str) -> None:
+    """Refuse to replace a published document with one that says less.
+
+    `docs/coverage.md` is committed and holds the 97%-unregistered figure,
+    which only a crawl run with code search can produce. A crawl run without it
+    renders a document with that section absent, and writing it over the top
+    deleted a published finding with no warning at all.
+
+    Caught once by reading a diff before committing, which is luck rather than a
+    control and stops working entirely the moment anything runs unattended.
+
+    Compared by heading rather than by length or by content. A crawl legitimately
+    changes every number in the document, so the only thing that reliably marks
+    a section as lost is its heading disappearing.
+    """
+    if not path.exists():
+        return
+
+    def headings(text: str) -> set[str]:
+        return {line.strip() for line in text.splitlines() if line.startswith("## ")}
+
+    lost = headings(path.read_text(encoding="utf-8")) - headings(rendered)
+    if lost:
+        raise ValueError(
+            f"{path} would lose {', '.join(sorted(h.lstrip('# ') for h in lost))}. "
+            "A crawl without --with-code-search cannot produce that section, and "
+            "overwriting would delete a published figure. Run with --with-code-search, "
+            "or move the document aside deliberately."
+        )
 
 
 def _search_sample(search: SearchFn, max_requests: int, moment: datetime) -> Sample:
@@ -311,12 +356,17 @@ def run_index_scan(
     as long as the scan of that server takes.
     """
     records = load_server_index(index_path)
+    # Captured before sampling, because it is the denominator every published
+    # figure is measured against and nothing downstream can recover it.
+    intake = Intake(corpus=len(records))
     if sample is not None:
         records = sample_index(records, sample, seed=seed)
+        intake = Intake(corpus=intake.corpus, sampled=sample, seed=seed)
 
     with tempfile.TemporaryDirectory() as workdir:
         return run_pipeline(
             records,
+            intake=intake,
             clone=clone,
             scan=scan,
             workdir=Path(workdir),
@@ -390,13 +440,39 @@ def _publish_command(args: argparse.Namespace) -> int:
     return 0
 
 
+def _published_repo_urls(data_dir: Path) -> dict[str, str]:
+    """The repository behind each published server, if a scan recorded them.
+
+    Absent when the data predates the file or was written by a republication,
+    which cannot know them. Missing entries render as "not recorded" rather
+    than breaking a page, because a stale file must not take the site down.
+    """
+    path = data_dir / SERVERS_FILE
+    if not path.exists():
+        return {}
+    return {
+        str(row["server_id"]): str(row["repo_url"])
+        for row in json.loads(path.read_text(encoding="utf-8"))
+    }
+
+
 def _site_command(args: argparse.Namespace) -> int:
     """Build the page's data from the published findings."""
     site = build_site_data(Path(args.data_dir))
     write_site_data(site, Path(args.out))
+
+    # The pages carry their data inline rather than fetching the JSON beside
+    # them. A `fetch` from file:// is blocked as a cross-origin request in every
+    # current browser, so a page that fetched would work on a host and be blank
+    # for anyone who opened the file - including a reviewer handed the repo.
+    out_dir = Path(args.page).parent
+    written = write_site(site, out_dir=out_dir, repo_urls=_published_repo_urls(Path(args.data_dir)))
+
+    print(f"{written} pages -> {out_dir}", file=sys.stderr)
     print(
-        f"{site.findings_total} findings as {site.decisions_total} decisions on "
-        f"{site.servers_affected} servers, {site.withheld} withheld -> {args.out}",
+        f"{site.findings_published} of {site.findings_found} findings as "
+        f"{site.decisions_published} decisions on "
+        f"{site.servers_affected} servers, {site.withheld} withheld -> {args.page}",
         file=sys.stderr,
     )
     return 0

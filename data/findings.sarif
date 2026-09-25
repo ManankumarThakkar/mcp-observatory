@@ -1622,7 +1622,7 @@
             "severity": "medium",
             "confidence": "low",
             "serverId": "io.github.godavid/gitjog",
-            "commitSha": "8b542513439d5a0b3e337319bc448a75f8c8f00f"
+            "commitSha": "87e92869e14773511b31209be9641d9e884b6695"
           }
         },
         {
@@ -1742,7 +1742,7 @@
             "severity": "medium",
             "confidence": "low",
             "serverId": "io.github.pipeshub-ai/mcp",
-            "commitSha": "a2500f4ea5b5a5acd804467165403afbf8c38b8b"
+            "commitSha": "9362abd6dd249efa3f8a19026f088d6a1a8090e6"
           }
         },
         {
@@ -2222,7 +2222,7 @@
             "severity": "medium",
             "confidence": "low",
             "serverId": "io.github.lonniev/roastify-mcp",
-            "commitSha": "ce955feba648723d0afdc334edb7038263ba46cf"
+            "commitSha": "5788321cfff692405e481224a200a849c5c1010f"
           }
         },
         {
@@ -2672,7 +2672,7 @@
             "severity": "medium",
             "confidence": "low",
             "serverId": "io.github.pipeshub-ai/mcp",
-            "commitSha": "a2500f4ea5b5a5acd804467165403afbf8c38b8b"
+            "commitSha": "9362abd6dd249efa3f8a19026f088d6a1a8090e6"
           }
         },
         {
@@ -2792,7 +2792,7 @@
             "severity": "medium",
             "confidence": "low",
             "serverId": "com.nooticr/mcp",
-            "commitSha": "4e1a8ae86a0bd6191e1c3cd8d4db759c38c51b6c"
+            "commitSha": "4373b4119e6de5bde7d0c585c6e5ea54f346412a"
           }
         },
         {
@@ -2882,7 +2882,7 @@
             "severity": "medium",
             "confidence": "low",
             "serverId": "com.nooticr/mcp",
-            "commitSha": "4e1a8ae86a0bd6191e1c3cd8d4db759c38c51b6c"
+            "commitSha": "4373b4119e6de5bde7d0c585c6e5ea54f346412a"
           }
         },
         {
@@ -3730,6 +3730,36 @@
           "ruleIndex": 0,
           "level": "warning",
           "message": {
+            "text": "SCOPE-OVERBROAD: accepts any origin (\"*\")"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "worker.js"
+                },
+                "region": {
+                  "startLine": 6374,
+                  "endLine": 6374
+                }
+              }
+            }
+          ],
+          "partialFingerprints": {
+            "primaryLocationLineHash": "62786a09898f0d057b5b00f908c8f4e5840f4b92cb3e237b7f1106abf1161ab5"
+          },
+          "properties": {
+            "severity": "medium",
+            "confidence": "low",
+            "serverId": "io.github.Mike05102/anime-intelligence-mcp",
+            "commitSha": "a020782903a5542e735b39962bfe0f4baac0df86"
+          }
+        },
+        {
+          "ruleId": "SCOPE-OVERBROAD",
+          "ruleIndex": 0,
+          "level": "warning",
+          "message": {
             "text": "SCOPE-OVERBROAD: accepts any origin ('*')"
           },
           "locations": [
@@ -4202,7 +4232,7 @@
             "severity": "medium",
             "confidence": "low",
             "serverId": "io.github.alisaitteke/photoshop-mcp",
-            "commitSha": "928603028b6c537ee857ff58780f3b25b8bf32db"
+            "commitSha": "ce1f56b2432973b54781bd9cabba24648ffff014"
           }
         },
         {
@@ -4382,7 +4412,7 @@
             "severity": "medium",
             "confidence": "low",
             "serverId": "io.github.markmnl/fmsg-mcp",
-            "commitSha": "ffdb9ec6229349c42834329875cc09020b873f62"
+            "commitSha": "afa97ce047ac9a01ed1259447e236f95e6343631"
           }
         },
         {
@@ -5012,7 +5042,7 @@
             "severity": "medium",
             "confidence": "low",
             "serverId": "com.nooticr/mcp",
-            "commitSha": "4e1a8ae86a0bd6191e1c3cd8d4db759c38c51b6c"
+            "commitSha": "4373b4119e6de5bde7d0c585c6e5ea54f346412a"
           }
         },
         {
@@ -5042,7 +5072,7 @@
             "severity": "medium",
             "confidence": "low",
             "serverId": "org.thorchain.swap/thorchain-swap",
-            "commitSha": "c1e73d9aebb76aac625332dccea4000e2000ba0f"
+            "commitSha": "e12e94ca84c210a680ba9fd38a1387ae944fc5c5"
           }
         },
         {
@@ -5312,7 +5342,7 @@
             "severity": "medium",
             "confidence": "low",
             "serverId": "com.nooticr/mcp",
-            "commitSha": "4e1a8ae86a0bd6191e1c3cd8d4db759c38c51b6c"
+            "commitSha": "4373b4119e6de5bde7d0c585c6e5ea54f346412a"
           }
         },
         {
@@ -5612,7 +5642,7 @@
             "severity": "medium",
             "confidence": "low",
             "serverId": "io.github.pipeshub-ai/mcp",
-            "commitSha": "a2500f4ea5b5a5acd804467165403afbf8c38b8b"
+            "commitSha": "9362abd6dd249efa3f8a19026f088d6a1a8090e6"
           }
         },
         {
@@ -5942,7 +5972,7 @@
             "severity": "medium",
             "confidence": "low",
             "serverId": "io.github.godavid/gitjog",
-            "commitSha": "8b542513439d5a0b3e337319bc448a75f8c8f00f"
+            "commitSha": "87e92869e14773511b31209be9641d9e884b6695"
           }
         },
         {
@@ -6332,7 +6362,7 @@
             "severity": "medium",
             "confidence": "low",
             "serverId": "com.nooticr/mcp",
-            "commitSha": "4e1a8ae86a0bd6191e1c3cd8d4db759c38c51b6c"
+            "commitSha": "4373b4119e6de5bde7d0c585c6e5ea54f346412a"
           }
         },
         {
@@ -6692,7 +6722,7 @@
             "severity": "medium",
             "confidence": "low",
             "serverId": "io.github.Mike05102/anime-intelligence-mcp",
-            "commitSha": "9dce8a0b22857cb816d5e6bef3b9581aa5169b77"
+            "commitSha": "a020782903a5542e735b39962bfe0f4baac0df86"
           }
         },
         {
@@ -7082,7 +7112,7 @@
             "severity": "medium",
             "confidence": "low",
             "serverId": "io.github.wyattpalm2-eng/x402-seller",
-            "commitSha": "3860a5db1857cc5078a947d08aa68ebedc1ede4b"
+            "commitSha": "dca0739fdba680e268cca74e60e81d90e7ad8249"
           }
         },
         {
@@ -8162,7 +8192,7 @@
             "severity": "medium",
             "confidence": "low",
             "serverId": "io.github.edycutjong/bagos",
-            "commitSha": "29e501c2084c62c31f9dc9acb1206342eea94ff6"
+            "commitSha": "47bddc588f92183bf139a66503708bda845493df"
           }
         },
         {
@@ -8702,7 +8732,7 @@
             "severity": "medium",
             "confidence": "low",
             "serverId": "com.nooticr/mcp",
-            "commitSha": "4e1a8ae86a0bd6191e1c3cd8d4db759c38c51b6c"
+            "commitSha": "4373b4119e6de5bde7d0c585c6e5ea54f346412a"
           }
         },
         {
