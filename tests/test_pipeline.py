@@ -278,3 +278,52 @@ def test_a_full_corpus_scan_records_no_sample(tmp_path: Path) -> None:
     summary = json.loads((tmp_path / "data" / "summary.json").read_text())
     assert summary["sampled"] is None
     assert summary["sample_seed"] is None
+
+
+def test_the_repository_of_every_published_server_is_published(tmp_path: Path) -> None:
+    """Findings carry a server_id and never the repository it came from, and
+    the id is a registry name that need not resemble the repository: one
+    published as `com.arcandledger/tax-tools` lives at a GitHub path nobody
+    would guess. A maintainer recognises their repository, so publishing the
+    id alone makes their own finding hard for them to identify.
+    """
+    from analyzer.pipeline import SERVERS_FILE, Intake
+
+    run_pipeline(
+        [_record("a/one")],
+        clone=_clone_ok,
+        scan=_scanner("medium"),
+        workdir=tmp_path / "work",
+        data_dir=tmp_path / "data",
+        cache_dir=tmp_path / "cache",
+        disclosure_records={},
+        now=NOW,
+        tool_version="0.1.0",
+        intake=Intake(corpus=1),
+    )
+
+    servers = json.loads((tmp_path / "data" / SERVERS_FILE).read_text())
+    assert servers == [{"server_id": "a/one", "repo_url": "https://github.com/a/one"}]
+
+
+def test_a_server_with_nothing_published_is_not_listed(tmp_path: Path) -> None:
+    """The file exists to identify published findings. Listing a server whose
+    findings are all withheld would name it in public output while the gate is
+    holding its findings back, which is the leak the gate exists to prevent.
+    """
+    from analyzer.pipeline import SERVERS_FILE, Intake
+
+    run_pipeline(
+        [_record("a/one")],
+        clone=_clone_ok,
+        scan=_scanner("critical"),
+        workdir=tmp_path / "work",
+        data_dir=tmp_path / "data",
+        cache_dir=tmp_path / "cache",
+        disclosure_records={},
+        now=NOW,
+        tool_version="0.1.0",
+        intake=Intake(corpus=1),
+    )
+
+    assert json.loads((tmp_path / "data" / SERVERS_FILE).read_text()) == []
