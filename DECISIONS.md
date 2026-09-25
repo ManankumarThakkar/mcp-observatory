@@ -61,13 +61,27 @@ grammar rejects.
 TypeScript-specific semantics take more work. Accepted.
 
 **Amended by D6.** The parsing harness covers both languages as decided here,
-but the v1 detection rules cover Python only. See D6.
+and so do the v1 detection rules: TypeScript and JavaScript. See D6. This note
+previously said "Python only", which was D6's original wording and was not
+updated when D6 itself was amended after measurement - the kind of stale
+cross-reference that a decision log accumulates precisely because nobody
+re-reads the note when the decision it points at changes.
 
 ---
 
 ## D4 - Small model for triage, not a frontier model
 
-**Decision.** `claude-haiku-4-5-20251001` adjudicates ambiguous findings.
+> **Superseded by D12 on the choice of model, 2026-09-24.** D12 requires a
+> calibrated probability rather than a free-text verdict and deliberately does
+> not pick an adjudicator: Plan 3 scores the rules alone, a decision model and
+> a frontier model against the golden set, and that measurement decides. The
+> reasoning below about preferring a small, cheap model over a frontier one at
+> ecosystem volume still stands and is why a decision model is a candidate at
+> all. The model id here also carried a date suffix, which is not how current
+> model ids are written.
+
+**Decision.** A small model, not a frontier model, adjudicates ambiguous
+findings.
 
 **Why.** Adjudication is a bounded classification task with a short input
 and a structured output. A frontier model costs substantially more across

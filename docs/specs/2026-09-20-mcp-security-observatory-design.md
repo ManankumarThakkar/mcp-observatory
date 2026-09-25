@@ -57,7 +57,7 @@ dashboard.
 |---|---|
 | Hosting | Static site, free tier |
 | Analyzer language | Python 3.11+, tree-sitter |
-| Triage model | `claude-haiku-4-5-20251001` |
+| Triage adjudicator | Chosen by measurement, not fixed here (`DECISIONS.md` D12) |
 | Runtime dependencies | tree-sitter and its grammars only |
 | Source material | Public repositories only |
 
@@ -178,9 +178,9 @@ measurement quality is worse than fewer. `SCOPE-OVERBROAD` is the first to cut i
   "evidence": "redacted source excerpt",
   "triage": {
     "adjudicated": true,
-    "verdict": "true_positive|false_positive|uncertain",
-    "model": "claude-haiku-4-5-20251001",
-    "rationale": "one sentence",
+    "probability": 0.93,
+    "threshold": 0.80,
+    "arm": "jev",
     "cached": false
   },
   "first_seen": "2026-09-20T00:00:00Z",
@@ -188,6 +188,13 @@ measurement quality is worse than fewer. `SCOPE-OVERBROAD` is the first to cut i
   "disclosure_state": "withheld|disclosed|published|opted_out"
 }
 ```
+
+A calibrated probability and the threshold applied to it, not a free-text
+verdict: a number that means what it says can be thresholded, tuned and
+reported as precision and recall *at that threshold*, so a reader can see the
+trade and disagree with it. `adjudicated` is false and `probability` absent
+when a finding was never sent - which is a different fact from a low
+probability, and the two must not be confused. See `DECISIONS.md` D12.
 
 `finding_id` is deterministic, so the same issue across nightly runs is one
 record with an updated `last_seen` - which is what produces the time series.
@@ -300,8 +307,10 @@ The measurement is the differentiator; a fifth rule is not.
 1. A public URL shows scan results across at least 1,000 real servers.
 2. Per-rule precision is measured against the golden set and published.
 2a. Per-language coverage is stated alongside every aggregate figure. The
-    four tree-sitter rules cover Python in v1 (see `DECISIONS.md` D6); a
-    Python-derived percentage is never presented as an ecosystem-wide one.
+    four tree-sitter rules cover TypeScript and JavaScript in v1, and
+    `UNICODE-CONCEAL` covers every language because it needs no parser (see
+    `DECISIONS.md` D6); a TypeScript-derived percentage is never presented as
+    an ecosystem-wide one. Python is the first post-v1 work.
 2b. The golden set is published as an open benchmark, with its sampling method
     and a scoring script others can run against their own scanners.
 3. The nightly job runs unattended and the time series has more than one point.
