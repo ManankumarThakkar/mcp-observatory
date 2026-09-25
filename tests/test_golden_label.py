@@ -1,3 +1,5 @@
+import json
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -148,3 +150,43 @@ def test_an_entry_naming_a_rule_the_view_does_not_know_is_refused() -> None:
     unstated question, and they would answer something."""
     with pytest.raises(KeyError, match="NO-SUCH-RULE"):
         render({**ENTRY, "rule_id": "NO-SUCH-RULE"}, RULES)
+
+
+def test_the_tool_has_a_working_entry_point(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """`python -m evals.golden.label` did nothing at all: the module had `run`
+    and no argparse or `__main__` block, so the documented command printed
+    nothing and recorded nothing. Found by running the command I had told
+    somebody to run, which is the only way that class of defect surfaces.
+    """
+    from evals.golden.label import main
+
+    path = tmp_path / "entries.jsonl"
+    path.write_text(
+        json.dumps(
+            {
+                "entry_id": "g-0001",
+                "rule_id": "SHELL-EXEC-UNSAFE",
+                "severity": "critical",
+                "confidence": "low",
+                "language": "typescript",
+                "context": "const a = 1\nexec(cmd)",
+                "flagged_offset": 1,
+                "label": None,
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr("builtins.input", lambda _: "y")
+
+    assert main(["--path", str(path)]) == 0
+    assert json.loads(path.read_text())["label"] == "true_positive"
+
+
+def test_a_missing_entries_file_says_to_draw_the_set_first(tmp_path: Path) -> None:
+    """A stack trace here sends somebody to read the source of a tool they were
+    told to run."""
+    from evals.golden.label import main
+
+    with pytest.raises(FileNotFoundError, match="draw the golden set"):
+        main(["--path", str(tmp_path / "absent.jsonl")])

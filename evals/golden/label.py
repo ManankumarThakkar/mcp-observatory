@@ -1,5 +1,6 @@
 """Record one human judgement per finding, from the window the models see."""
 
+import argparse
 import json
 import sys
 from collections.abc import Mapping, Sequence
@@ -155,3 +156,21 @@ def run(path: Path) -> int:
         if answer in KEYS:
             entries = apply_label(entries, str(entry["entry_id"]), KEYS[answer])
             _write(path, entries)
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0] if __doc__ else "")
+    parser.add_argument(
+        "--path",
+        type=Path,
+        default=Path(".cache/golden-entries.jsonl"),
+        help="The entries file to label. Written after every keystroke.",
+    )
+    args = parser.parse_args(argv)
+    if not args.path.exists():
+        raise FileNotFoundError(f"no entries at {args.path}; draw the golden set first")
+    return run(args.path)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
