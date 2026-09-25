@@ -39,6 +39,10 @@ class RuleSummary:
     title: str
     description: str
     languages: tuple[str, ...]
+    # What the rule produced in total, published or not. Without it the table
+    # shows four rules at zero, which reads as a scanner that finds nothing
+    # rather than one whose findings are withheld in full.
+    found: int
     findings: int
     decisions: int
     servers: int
@@ -158,12 +162,16 @@ def build_site_data(data_dir: Path) -> SiteData:
         for (server_id, rule_id, evidence), members in sorted(grouped.items())
     )
 
+    # Aggregate per-rule totals, published or not. Non-attributable, which is
+    # the category the disclosure policy publishes immediately.
+    found_by_rule = summary.get("found_by_rule", {})
     rules = tuple(
         RuleSummary(
             rule_id=rule.rule_id,
             title=rule.title,
             description=rule.description,
             languages=tuple(rule.languages),
+            found=int(found_by_rule.get(rule.rule_id, 0)),
             findings=sum(1 for row in rows if row["rule_id"] == rule.rule_id),
             decisions=sum(1 for group in groups if group.rule_id == rule.rule_id),
             servers=len({row["server_id"] for row in rows if row["rule_id"] == rule.rule_id}),

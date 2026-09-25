@@ -7,7 +7,15 @@
     "withheld": 973
   },
   "failed": 0,
+  "found_by_rule": {
+    "PATH-TRAVERSAL": 165,
+    "SCOPE-OVERBROAD": 323,
+    "SHELL-EXEC-UNSAFE": 128,
+    "TOOL-DESC-INJECTION": 600,
+    "UNICODE-CONCEAL": 80
+  },
   "generated_at": "2026-09-25T08:18:46Z",
+  "published_at": "2026-09-25T15:11:01Z",
   "sample_seed": 20260923,
   "sampled": 2000,
   "scanned": 1643,

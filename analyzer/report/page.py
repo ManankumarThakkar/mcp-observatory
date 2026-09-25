@@ -6,6 +6,11 @@ from urllib.parse import urlparse
 
 from analyzer.report.site import Decision, SiteData
 
+# Author and source, on every page. A portfolio site a reviewer cannot trace
+# back to a person or to the code is a dead end for both of them.
+AUTHOR = "Manan Thakkar"
+REPOSITORY = "https://github.com/ManankumarThakkar/mcp-observatory"
+
 # Rendered as a single file with nothing fetched at runtime. A static dashboard
 # that needs a server to assemble itself is not a static dashboard: this one
 # opens from file://, from a static host, and with no network at all, which is
@@ -69,6 +74,8 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .
   border: 1px solid var(--line); border-radius: 0 0 8px 0; z-index: 10;
 }
 .skip:focus { left: 0; }
+nav { margin: 0 0 1.5rem; font-size: .9375rem; }
+nav a { font-weight: 500; }
 .bar { width: 100%; height: 2.5rem; display: block; margin: .25rem 0 .5rem; }
 .legend { display: flex; flex-wrap: wrap; gap: 1rem; margin: 0; padding: 0; list-style: none; font-size: .875rem; }
 .legend li { display: flex; align-items: center; gap: .5rem; }
@@ -119,7 +126,7 @@ def _disclosure_bar(site: SiteData) -> str:
     published = site.findings_published / found * 100
     label = (
         f"{_n(site.findings_published)} of {_n(site.findings_found)} findings published, "
-        f"{_n(site.withheld)} withheld pending disclosure"
+        f"{_n(site.withheld)} withheld, none disclosed"
     )
     return f"""  <svg class="bar" viewBox="0 0 100 8" preserveAspectRatio="none"
        role="img" aria-label="{escape(label, quote=True)}">
@@ -130,7 +137,7 @@ def _disclosure_bar(site: SiteData) -> str:
     <li><span class="swatch" style="background: var(--accent)"></span>
         {_n(site.findings_published)} published ({published:.0f}%)</li>
     <li><span class="swatch" style="background: var(--muted)"></span>
-        {_n(site.withheld)} withheld pending disclosure ({100 - published:.0f}%)</li>
+        {_n(site.withheld)} withheld, none disclosed ({100 - published:.0f}%)</li>
   </ul>"""
 
 
@@ -160,9 +167,10 @@ def render_overview(site: SiteData) -> str:
     rules = "\n".join(
         f"      <tr><td><strong>{escape(r.title)}</strong><br>"
         f'<span class="note"><code>{escape(r.rule_id)}</code> &middot; {_languages(r.languages)}</span></td>'
-        f'<td class="n{"" if r.decisions else " zero"}">{_n(r.decisions)}</td>'
-        f'<td class="n{"" if r.servers else " zero"}">{_n(r.servers)}</td>'
-        f'<td class="n{"" if r.findings else " zero"}">{_n(r.findings)}</td></tr>'
+        f'<td class="n">{_n(r.found)}</td>'
+        f'<td class="n{"" if r.findings else " zero"}">{_n(r.findings)}</td>'
+        f'<td class="n{"" if r.found - r.findings else " zero"}">{_n(r.found - r.findings)}</td>'
+        f'<td class="n{"" if r.servers else " zero"}">{_n(r.servers)}</td></tr>'
         for r in site.rules
     )
     coverage = "\n".join(
@@ -171,7 +179,8 @@ def render_overview(site: SiteData) -> str:
         for c in site.coverage
     )
     top = "\n".join(
-        f"      <tr><td><code>{escape(g.server_id)}</code></td>"
+        f'      <tr><td><a href="servers/{server_slug(g.server_id)}.html">'
+        f"<code>{escape(g.server_id)}</code></a></td>"
         f"<td>{escape(g.evidence)}</td>"
         f'<td class="n">{_n(g.occurrences)}</td></tr>'
         for g in sorted(site.groups, key=lambda g: -g.occurrences)[:10]
@@ -183,6 +192,7 @@ def render_overview(site: SiteData) -> str:
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>MCP Security Observatory</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath fill='%231f6feb' d='M8 1 2 3.5v4.2c0 3.6 2.5 6.6 6 7.3 3.5-.7 6-3.7 6-7.3V3.5L8 1Z'/%3E%3C/svg%3E">
 <meta name="description" content="A risk index for Model Context Protocol servers, published with its own measured accuracy.">
 <style>{_STYLE}</style>
 </head>
@@ -195,6 +205,10 @@ def render_overview(site: SiteData) -> str:
   published servers, with the scanner&rsquo;s own accuracy measured on a random sample of its
   output and published beside the results.</p>
 </header>
+
+<nav aria-label="Sections">
+  <a href="findings.html">Browse all published findings &rarr;</a>
+</nav>
 
 <main id="main">
   <h2>What was examined</h2>
@@ -219,7 +233,7 @@ def render_overview(site: SiteData) -> str:
     <li><span class="k">Published</span><div class="v">{_n(site.findings_published)}</div>
         <div class="sub">{_n(site.decisions_published)} distinct decisions</div></li>
     <li><span class="k">Withheld</span><div class="v">{_n(site.withheld)}</div>
-        <div class="sub">pending private disclosure</div></li>
+        <div class="sub">high and critical, none disclosed</div></li>
     <li><span class="k">Servers affected</span><div class="v">{_n(site.servers_affected)}</div>
         <div class="sub">in the published set</div></li>
   </ul>
@@ -236,17 +250,21 @@ def render_overview(site: SiteData) -> str:
 
   <div class="callout">
     <p><strong>{_n(site.withheld)} of {_n(site.findings_found)} findings are not shown.</strong>
-    Every high and critical finding is withheld pending private disclosure to its maintainer,
-    so the table below is the least severe part of what was found and is not a picture of the
-    ecosystem&rsquo;s worst problems. Maintainer opt-out is honoured unconditionally.</p>
+    Every high and critical finding is withheld, so the table below is the least severe part of
+    what was found and is not a picture of the ecosystem&rsquo;s worst problems.
+    <strong>No maintainer has been notified:</strong> notification is not implemented, a
+    disclosure window opens only when a notification is recorded, and so nothing above medium
+    severity has ever been published. The gate failing closed is the intended direction.
+    Maintainer opt-out is honoured unconditionally.</p>
   </div>
 
   <h2>By rule <span class="n">&mdash; published</span></h2>
   <div class="scroll">
   <table>
-    <caption>A decision is one thing a maintainer would fix. One decision often appears on
-    several lines, so rows are shown separately rather than counted as problems.</caption>
-    <thead><tr><th scope="col">Rule</th><th scope="col" class="n">Decisions</th><th scope="col" class="n">Servers</th><th scope="col" class="n">Rows</th></tr></thead>
+    <caption>Found is every finding the rule produced. Published is what cleared the
+    disclosure gate. A rule can find hundreds and publish none, which is what four of these
+    five do.</caption>
+    <thead><tr><th scope="col">Rule</th><th scope="col" class="n">Found</th><th scope="col" class="n">Published</th><th scope="col" class="n">Withheld</th><th scope="col" class="n">Servers</th></tr></thead>
     <tbody>
 {rules}
     </tbody>
@@ -284,7 +302,11 @@ def render_overview(site: SiteData) -> str:
   <p>Scanner version {escape(site.tool_version)}. Scanned {escape(site.generated_at)},
   published {escape(site.published_at)}. Findings, SARIF and the coverage summary are
   committed to the repository, so this page is reproducible from published data alone.</p>
-  <p>Never runs the code it examines. Reads only public repositories.</p>
+  <p>Never runs the code it examines. Reads only public repositories.
+  Every figure above is computed from the committed data and the method is
+  published, so this page is reproducible rather than asserted.</p>
+  <p>Built by {escape(AUTHOR)} &middot;
+     <a href="{REPOSITORY}" rel="noopener">Source, decision log and disclosure policy</a></p>
 </footer>
 </div>
 </body>
@@ -370,6 +392,7 @@ def _shell(title: str, body: str, *, depth: int = 0) -> str:
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{escape(title)}</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath fill='%231f6feb' d='M8 1 2 3.5v4.2c0 3.6 2.5 6.6 6 7.3 3.5-.7 6-3.7 6-7.3V3.5L8 1Z'/%3E%3C/svg%3E">
 <style>{_STYLE}</style>
 </head>
 <body>
@@ -379,6 +402,8 @@ def _shell(title: str, body: str, *, depth: int = 0) -> str:
 <footer>
   <p><a href="{"../" * depth}index.html">Back to the overview</a></p>
   <p>Never runs the code it examines. Reads only public repositories.</p>
+  <p>Built by {escape(AUTHOR)} &middot;
+     <a href="{REPOSITORY}" rel="noopener">Source and engineering log</a></p>
 </footer>
 </div>
 </body>
@@ -457,10 +482,11 @@ def render_server(server_id: str, site: SiteData, *, repo_urls: dict[str, str]) 
 <main id="main">
   <div class="callout">
     <p><strong>This is not a clean bill of health.</strong> Only findings that cleared the
-    disclosure gate appear below. Every high and critical finding is withheld pending private
-    disclosure to the maintainer, so this server may have findings that are not shown here.
-    Accuracy has not yet been measured, so treat each one as a candidate rather than a
-    confirmed problem.</p>
+    disclosure gate appear below, and every high and critical finding is withheld - so this
+    server may have findings that are not shown here. Notification is not implemented yet, so
+    no disclosure window has opened and nothing above medium severity has been published at
+    all. Accuracy has not been measured, so treat each finding below as a candidate rather
+    than a confirmed problem.</p>
   </div>
 
   <h2>Published findings <span class="n">&mdash; {len(groups)} decision{"" if len(groups) == 1 else "s"}</span></h2>

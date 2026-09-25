@@ -142,3 +142,35 @@ def test_the_layout_has_no_fixed_pixel_widths() -> None:
     offenders = [m for m in re.findall(r"(?<!max-)width:\s*(\d+)px", _STYLE) if int(m) > 0]
 
     assert offenders == [], offenders
+
+
+def test_the_page_does_not_imply_a_disclosure_process_is_running() -> None:
+    """The policy was amended after the first publication because the site said
+    findings were "pending private disclosure to the maintainer", which reads as
+    a process that runs. Nothing notifies anyone, so no window has ever opened.
+
+    A security page that overstates its own disclosure practice is the one
+    overstatement that matters most here, and it is checkable.
+    """
+    from analyzer.report.page import render_server
+    from tests.conftest import SITE
+
+    for html in (render_overview(SITE), render_server("acme/one", SITE, repo_urls={})):
+        lowered = html.lower()
+        assert "pending private disclosure" not in lowered
+        assert "not implemented" in lowered
+
+
+def test_every_page_names_its_author_and_links_the_source() -> None:
+    """A portfolio page a reviewer cannot trace to a person or to the code is a
+    dead end for both of them."""
+    from analyzer.report.page import AUTHOR, REPOSITORY, render_findings, render_server
+    from tests.conftest import SITE
+
+    for html in (
+        render_overview(SITE),
+        render_findings(SITE, repo_urls={}),
+        render_server("acme/one", SITE, repo_urls={}),
+    ):
+        assert AUTHOR in html
+        assert REPOSITORY in html
