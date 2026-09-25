@@ -138,6 +138,9 @@ class PathTraversalRule:
 
     rule_id = "PATH-TRAVERSAL"
     title = "Tool input reaching the filesystem unchecked"
+    # TypeScript and JavaScript, which the tsx grammar reads as one
+    # family. The gate below uses this rather than a second copy of it.
+    languages: tuple[str, ...] = ("typescript", "tsx")
     description = (
         "A parameter of a registered tool handler reaches a file operation "
         "without anything proving the path stayed inside its intended "
@@ -147,7 +150,7 @@ class PathTraversalRule:
 
     def analyze(self, ctx: FileContext) -> list[Finding]:
         parsed: ParsedFile | None = ctx.parsed
-        if parsed is None or parsed.language not in ("typescript", "tsx"):
+        if parsed is None or parsed.language not in self.languages:
             return []
 
         bindings = bindings_for(parsed, MODULE_NAMES)

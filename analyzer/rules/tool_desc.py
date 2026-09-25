@@ -273,6 +273,9 @@ class ToolDescInjectionRule:
 
     rule_id = "TOOL-DESC-INJECTION"
     title = "Instructions planted in tool metadata"
+    # TypeScript and JavaScript, which the tsx grammar reads as one
+    # family. The gate below uses this rather than a second copy of it.
+    languages: tuple[str, ...] = ("typescript", "tsx")
     description = (
         "A tool or parameter description reads as an instruction addressed "
         "to the assistant rather than as a description of what the tool "
@@ -283,7 +286,7 @@ class ToolDescInjectionRule:
 
     def analyze(self, ctx: FileContext) -> list[Finding]:
         parsed: ParsedFile | None = ctx.parsed
-        if parsed is None or parsed.language not in ("typescript", "tsx"):
+        if parsed is None or parsed.language not in self.languages:
             return []
 
         return [

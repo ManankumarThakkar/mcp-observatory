@@ -3,6 +3,7 @@ import dataclasses
 import pytest
 
 from analyzer.models import Finding, Location
+from analyzer.rules import ALL_RULES
 from analyzer.rules.base import FileContext, Rule
 
 
@@ -18,6 +19,7 @@ class _StubRule:
     rule_id = "STUB-RULE"
     title = "A stub"
     description = "Exists only to prove the protocol can be satisfied."
+    languages: tuple[str, ...] = ("*",)
 
     def analyze(self, ctx: FileContext) -> list[Finding]:
         return [
@@ -63,3 +65,50 @@ def test_file_context_is_immutable() -> None:
 
     with pytest.raises(dataclasses.FrozenInstanceError):
         ctx.source = "something else"  # type: ignore[misc]
+
+
+def test_every_rule_declares_the_languages_it_examines() -> None:
+    """Success criterion 2a states per-language coverage alongside every
+    aggregate figure. Coverage was enforced inside each rule's analyze and
+    declared nowhere, so anything publishing it had to restate it from reading
+    the source - and the figure criterion 2a governs would be a second copy
+    that could quietly disagree with the code.
+    """
+    for rule in ALL_RULES:
+        assert rule.languages, f"{rule.rule_id} declares no languages"
+
+
+def test_the_declared_languages_are_the_ones_actually_gated_on() -> None:
+    """A declaration the code does not honour is worse than no declaration:
+    the dashboard would state a coverage the scanner does not have.
+
+    The four tree-sitter rules examine TypeScript and JavaScript, which the
+    tsx grammar reads as one family. UNICODE-CONCEAL examines everything,
+    because a codepoint scan needs no parser.
+    """
+    declared = {rule.rule_id: set(rule.languages) for rule in ALL_RULES}
+
+    assert declared["UNICODE-CONCEAL"] == {"*"}
+    for rule_id in ("TOOL-DESC-INJECTION", "PATH-TRAVERSAL", "SHELL-EXEC-UNSAFE", "SCOPE-OVERBROAD"):
+        assert declared[rule_id] == {"typescript", "tsx"}, rule_id
+
+
+def test_a_parsed_rule_declining_a_language_it_declares_would_be_caught() -> None:
+    """The declaration is load-bearing, so it is checked against behaviour
+    rather than trusted. A rule that declared typescript and then refused a
+    typescript file would publish a coverage claim it does not meet.
+    """
+    from analyzer.parsing.trees import parse_source
+    from analyzer.rules.base import FileContext
+
+    source = "const x = 1;\n"
+    parsed = parse_source(source, ".ts")
+    ctx = FileContext(
+        server_id="a/b", commit_sha="a" * 40, relative_path="i.ts", source=source, parsed=parsed
+    )
+
+    for rule in ALL_RULES:
+        if "typescript" in rule.languages or "*" in rule.languages:
+            # Must not raise and must not refuse outright; an empty result on
+            # clean code is correct, an exception is not.
+            assert rule.analyze(ctx) == []

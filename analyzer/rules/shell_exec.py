@@ -115,6 +115,9 @@ class ShellExecUnsafeRule:
 
     rule_id = "SHELL-EXEC-UNSAFE"
     title = "Tool input reaching a command interpreter"
+    # TypeScript and JavaScript, which the tsx grammar reads as one
+    # family. The gate below uses this rather than a second copy of it.
+    languages: tuple[str, ...] = ("typescript", "tsx")
     description = (
         "A value an assistant supplies reaches a shell. Node's exec and "
         "execSync run their argument through a shell every time, and spawn "
@@ -125,7 +128,7 @@ class ShellExecUnsafeRule:
 
     def analyze(self, ctx: FileContext) -> list[Finding]:
         parsed: ParsedFile | None = ctx.parsed
-        if parsed is None or parsed.language not in ("typescript", "tsx"):
+        if parsed is None or parsed.language not in self.languages:
             return []
         if not CHILD_PROCESS.search(ctx.source):
             return []
