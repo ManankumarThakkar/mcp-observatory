@@ -1,0 +1,132 @@
+name: Nightly
+
+on:
+  schedule:
+    # 03:10 UTC. Off the hour because the hour is when every scheduled job on
+    # the platform fires at once and queueing is worst.
+    - cron: "10 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Never two at once. Two scans would append two points for the same night and
+# race on the trend branch, and the loser's measurement would be lost silently.
+concurrency:
+  group: nightly
+  cancel-in-progress: false
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    # The corpus scan is the long pole. The platform's ceiling is six hours;
+    # this stops a hung clone from burning all of it.
+    timeout-minutes: 90
+    permissions:
+      contents: write
+      pages: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      # The trend is the only output a nightly run cannot regenerate: a point
+      # for a night that has passed can never be measured again. It lives on its
+      # own branch because `main` requires pull requests, and the alternative -
+      # a long-lived write credential on the default branch - is not a trade
+      # this project should make, being about supply-chain trust.
+      - name: Fetch the series so far
+        run: |
+          git fetch origin nightly-data:nightly-data 2>/dev/null || echo "no series yet, this is the first night"
+          mkdir -p series
+          git show nightly-data:trend.jsonl > series/trend.jsonl 2>/dev/null || : > series/trend.jsonl
+          echo "points so far: $(wc -l < series/trend.jsonl)"
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+
+      - name: Install
+        run: pip install -e .
+
+      # Census only, deliberately. The code-search pass costs twenty minutes and
+      # 198 requests against a ten-per-minute limit, and its figure moves on the
+      # scale of months rather than nights. The erasure guard refuses to
+      # overwrite the committed coverage document with a census-only one, so
+      # docs/coverage.md is left alone here.
+      - name: Crawl the registry
+        run: mcp-observatory crawl --summary /tmp/coverage.md
+
+      # The same sample and the same seed every night. A trend is only a trend
+      # if consecutive points measure the same thing; a fresh sample each night
+      # would move the numbers for a reason that has nothing to do with the
+      # ecosystem.
+      - name: Scan
+        run: mcp-observatory scan --index .cache/server_index.jsonl --sample 2000
+
+      - name: Build the site and record tonight's point
+        run: mcp-observatory site --trend series/trend.jsonl
+
+      - name: Check what is about to be published
+        run: |
+          python - <<'PY'
+          import json, sys
+          from pathlib import Path
+
+          page = Path("web/index.html").read_text(encoding="utf-8")
+          summary = json.loads(Path("data/summary.json").read_text(encoding="utf-8"))
+          series = [l for l in Path("series/trend.jsonl").read_text().splitlines() if l.strip()]
+
+          problems = []
+          if len(page) < 4000:
+              problems.append(f"index.html is only {len(page)} bytes")
+          for figure in (summary["corpus"], summary["scanned"]):
+              if f"{figure:,}" not in page:
+                  problems.append(f"{figure:,} is missing from the page")
+          if "not yet measured" not in page.lower():
+              problems.append("the page does not say accuracy is unmeasured")
+          if "withheld" not in page.lower():
+              problems.append("the page does not mention withheld findings")
+          if not series:
+              problems.append("no trend point was recorded")
+
+          if problems:
+              sys.exit("refusing to publish:\n  " + "\n  ".join(problems))
+          print(f"{len(page):,} bytes, {len(series)} trend points")
+          PY
+
+      # Pushed after the publish check passes, so a night that produced an
+      # unpublishable page does not leave a point claiming it published one.
+      - name: Save tonight's point
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -B nightly-data
+          # Only the series. The findings themselves are published by the Pages
+          # artifact below and reviewed into main separately; committing them
+          # here would put the same facts in two places with no way to say which
+          # is current.
+          find . -maxdepth 1 -mindepth 1 ! -name .git ! -name series -exec rm -rf {} +
+          mv series/trend.jsonl trend.jsonl
+          rmdir series
+          git add -A trend.jsonl
+          git commit -q -m "trend: $(date -u +%Y-%m-%d)" || { echo "nothing changed"; exit 0; }
+          git push -q --force-with-lease origin nightly-data
+
+      - uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
+
+      - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: web
+
+  deploy:
+    needs: scan
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - id: deploy
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
