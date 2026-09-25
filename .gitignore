@@ -36,3 +36,5 @@ docs/research/
 # checked-in copy can go stale against the findings it describes.
 web/site-data.json
 web/index.html
+web/findings.html
+web/servers/

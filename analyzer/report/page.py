@@ -1,8 +1,9 @@
 """The overview page: one self-contained file, generated from the site data."""
 
 from html import escape
+from pathlib import Path
 
-from analyzer.report.site import SiteData
+from analyzer.report.site import Decision, SiteData
 
 # Rendered as a single file with nothing fetched at runtime. A static dashboard
 # that needs a server to assemble itself is not a static dashboard: this one
@@ -239,3 +240,194 @@ def render_overview(site: SiteData) -> str:
 </body>
 </html>
 """
+
+
+def server_slug(server_id: str) -> str:
+    """A path segment for one server.
+
+    Server ids are registry names carrying dots and a slash -
+    `io.github.Trusty-Squire/mcp` - and neither a slash nor mixed case belongs
+    in a path that has to work on a case-insensitive filesystem and in a URL.
+    The slash becomes a double dash, which cannot arise from a single dash in
+    the original and so keeps the mapping injective for ordinary ids.
+    """
+    return server_id.replace("/", "--").lower()
+
+
+def _slugs(site: SiteData) -> dict[str, str]:
+    """Slug per affected server, refusing a collision.
+
+    Two servers sharing a slug would silently overwrite one page with the
+    other, and the maintainer of the first would read somebody else's findings.
+    Lowercasing makes that possible, so it is checked rather than assumed.
+    """
+    slugs: dict[str, str] = {}
+    seen: dict[str, str] = {}
+    for server_id in sorted({group.server_id for group in site.groups}):
+        slug = server_slug(server_id)
+        if slug in seen:
+            raise ValueError(
+                f"slug collision: {server_id!r} and {seen[slug]!r} both become {slug!r}"
+            )
+        seen[slug] = server_id
+        slugs[server_id] = slug
+    return slugs
+
+
+def _repo_cell(server_id: str, repo_urls: dict[str, str]) -> str:
+    url = repo_urls.get(server_id)
+    if not url:
+        return '<span class="note">not recorded</span>'
+    safe = escape(url, quote=True)
+    return f'<a href="{safe}" rel="noopener nofollow">{escape(url)}</a>'
+
+
+def _shell(title: str, body: str, *, depth: int = 0) -> str:
+    """The page frame, shared so every page carries the same styles inline."""
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{escape(title)}</title>
+<style>{_STYLE}</style>
+</head>
+<body>
+<div class="wrap">
+{body}
+<footer>
+  <p><a href="{"../" * depth}index.html">Back to the overview</a></p>
+  <p>Never runs the code it examines. Reads only public repositories.</p>
+</footer>
+</div>
+</body>
+</html>
+"""
+
+
+def render_findings(site: SiteData, *, repo_urls: dict[str, str]) -> str:
+    """Every published decision, grouped by the server it belongs to.
+
+    This is how a maintainer finds their own server, so it lists all of them on
+    one page rather than paginating: a browser's own find is the search, and it
+    only works on what is present.
+    """
+    slugs = _slugs(site)
+    by_server: dict[str, list[Decision]] = {}
+    for group in site.groups:
+        by_server.setdefault(group.server_id, []).append(group)
+
+    rows = "\n".join(
+        f"      <tr><td><a href=\"servers/{slugs[server_id]}.html\"><code>{escape(server_id)}</code></a><br>"
+        f'<span class="note">{_repo_cell(server_id, repo_urls)}</span></td>'
+        f'<td class="n">{len(groups)}</td>'
+        f'<td class="n">{sum(g.occurrences for g in groups)}</td>'
+        f"<td>{escape(', '.join(sorted({g.evidence for g in groups})))}</td></tr>"
+        for server_id, groups in sorted(by_server.items())
+    )
+
+    body = f"""<header>
+  <h1>Published findings</h1>
+  <p class="lede">{_n(site.decisions_published)} decisions across
+  {_n(site.servers_affected)} servers, from {_n(site.scanned)} scanned.
+  {_n(site.withheld)} further findings are withheld pending private disclosure and do not
+  appear here.</p>
+</header>
+
+<main>
+  <div class="callout">
+    <p><strong>Looking for your own server and not finding it?</strong> A repository can be
+    registered under more than one name, and findings are published under one of them, so the
+    name you know may not be the name listed. The repository address beside each server is the
+    reliable way to recognise your own. If your findings are high or critical they are withheld
+    entirely and will not appear here at all.</p>
+  </div>
+
+  <h2>By server</h2>
+  <div class="scroll">
+  <table>
+    <caption>A decision is one thing to fix. Lines counts how many places it appears.</caption>
+    <thead><tr><th>Server</th><th class="n">Decisions</th><th class="n">Lines</th><th>Reported</th></tr></thead>
+    <tbody>
+{rows}
+    </tbody>
+  </table>
+  </div>
+</main>"""
+    return _shell("Published findings", body)
+
+
+def render_server(server_id: str, site: SiteData, *, repo_urls: dict[str, str]) -> str:
+    """One server's published findings, and what is not shown about it."""
+    groups = [g for g in site.groups if g.server_id == server_id]
+    rows = "\n".join(
+        f"      <tr><td>{escape(g.evidence)}</td>"
+        f'<td class="n">{g.occurrences}</td>'
+        f"<td><code>{escape(', '.join(g.locations))}</code></td>"
+        f'<td class="note">{escape(g.first_seen[:10])}</td></tr>'
+        for g in sorted(groups, key=lambda g: -g.occurrences)
+    )
+
+    body = f"""<header>
+  <h1><code>{escape(server_id)}</code></h1>
+  <p class="lede">{_repo_cell(server_id, repo_urls)}</p>
+</header>
+
+<main>
+  <div class="callout">
+    <p><strong>This is not a clean bill of health.</strong> Only findings that cleared the
+    disclosure gate appear below. Every high and critical finding is withheld pending private
+    disclosure to the maintainer, so this server may have findings that are not shown here.
+    Accuracy has not yet been measured, so treat each one as a candidate rather than a
+    confirmed problem.</p>
+  </div>
+
+  <h2>Published findings <span class="n">&mdash; {len(groups)} decision{"" if len(groups) == 1 else "s"}</span></h2>
+  <div class="scroll">
+  <table>
+    <thead><tr><th>What the rule reported</th><th class="n">Lines</th><th>Where</th><th>First seen</th></tr></thead>
+    <tbody>
+{rows}
+    </tbody>
+  </table>
+  </div>
+
+  <p class="note">To have findings about this server withheld from publication entirely, see
+  the opt-out in <code>SECURITY.md</code>. Opt-out is honoured unconditionally.</p>
+</main>"""
+    return _shell(server_id, body, depth=1)
+
+
+def write_site(site: SiteData, *, out_dir: Path, repo_urls: dict[str, str]) -> int:
+    """Write every page, and return how many files were written.
+
+    Per-server pages exist so a maintainer can be sent a link to their own
+    findings, which is what a disclosure notice needs. That is also why the
+    slug is checked for collisions rather than assumed unique: a link that
+    quietly resolved to somebody else's server would send one maintainer
+    another's findings.
+
+    Stale server pages are removed. A server whose findings are all withheld
+    after a rescan would otherwise keep a page nothing links to, still public
+    and still naming it.
+    """
+    out_dir.mkdir(parents=True, exist_ok=True)
+    (out_dir / "index.html").write_text(render_overview(site), encoding="utf-8")
+    (out_dir / "findings.html").write_text(
+        render_findings(site, repo_urls=repo_urls), encoding="utf-8"
+    )
+
+    servers_dir = out_dir / "servers"
+    servers_dir.mkdir(parents=True, exist_ok=True)
+    slugs = _slugs(site)
+    for server_id, slug in slugs.items():
+        (servers_dir / f"{slug}.html").write_text(
+            render_server(server_id, site, repo_urls=repo_urls), encoding="utf-8"
+        )
+
+    wanted = {f"{slug}.html" for slug in slugs.values()}
+    for stale in servers_dir.glob("*.html"):
+        if stale.name not in wanted:
+            stale.unlink()
+
+    return 2 + len(slugs)

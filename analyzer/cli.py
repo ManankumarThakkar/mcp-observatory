@@ -29,6 +29,7 @@ from analyzer.errors import InputError
 from analyzer.fetcher.clone import FetchError, shallow_clone
 from analyzer.orchestrator import CloneFn, ScanFn
 from analyzer.pipeline import (
+    SERVERS_FILE,
     CollapsedRun,
     Intake,
     PipelineResult,
@@ -36,7 +37,7 @@ from analyzer.pipeline import (
     run_pipeline,
 )
 from analyzer.report.merge import utc_stamp
-from analyzer.report.page import render_overview
+from analyzer.report.page import write_site
 from analyzer.report.site import build_site_data, write_site_data
 from analyzer.scanner import scan_directory
 
@@ -406,19 +407,35 @@ def _publish_command(args: argparse.Namespace) -> int:
     return 0
 
 
+def _published_repo_urls(data_dir: Path) -> dict[str, str]:
+    """The repository behind each published server, if a scan recorded them.
+
+    Absent when the data predates the file or was written by a republication,
+    which cannot know them. Missing entries render as "not recorded" rather
+    than breaking a page, because a stale file must not take the site down.
+    """
+    path = data_dir / SERVERS_FILE
+    if not path.exists():
+        return {}
+    return {
+        str(row["server_id"]): str(row["repo_url"])
+        for row in json.loads(path.read_text(encoding="utf-8"))
+    }
+
+
 def _site_command(args: argparse.Namespace) -> int:
     """Build the page's data from the published findings."""
     site = build_site_data(Path(args.data_dir))
     write_site_data(site, Path(args.out))
 
-    # The page carries its data inline rather than fetching the JSON beside
-    # it. A `fetch` from file:// is blocked as a cross-origin request in every
+    # The pages carry their data inline rather than fetching the JSON beside
+    # them. A `fetch` from file:// is blocked as a cross-origin request in every
     # current browser, so a page that fetched would work on a host and be blank
     # for anyone who opened the file - including a reviewer handed the repo.
-    page = Path(args.page)
-    page.parent.mkdir(parents=True, exist_ok=True)
-    page.write_text(render_overview(site), encoding="utf-8")
+    out_dir = Path(args.page).parent
+    written = write_site(site, out_dir=out_dir, repo_urls=_published_repo_urls(Path(args.data_dir)))
 
+    print(f"{written} pages -> {out_dir}", file=sys.stderr)
     print(
         f"{site.findings_published} of {site.findings_found} findings as "
         f"{site.decisions_published} decisions on "
