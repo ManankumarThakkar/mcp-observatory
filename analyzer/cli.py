@@ -215,14 +215,47 @@ def run_crawl(
     if search is not None:
         coverage = replace(coverage, sample=_search_sample(search, search_requests, moment))
 
+    rendered = render_coverage(coverage)
+    _refuse_to_lose_a_section(summary_path, rendered)
     summary_path.parent.mkdir(parents=True, exist_ok=True)
-    summary_path.write_text(render_coverage(coverage), encoding="utf-8")
+    summary_path.write_text(rendered, encoding="utf-8")
     write_corpus(corpus_path, coverage)
     # The scan's input, and the only one of the three a later command reads.
     # Collapsed to one record per repository, because the orchestrator clones
     # per record and the coverage summary has already reported that saving.
     write_server_index(index_path, collapse_to_index(crawl.records))
     return coverage
+
+
+def _refuse_to_lose_a_section(path: Path, rendered: str) -> None:
+    """Refuse to replace a published document with one that says less.
+
+    `docs/coverage.md` is committed and holds the 97%-unregistered figure,
+    which only a crawl run with code search can produce. A crawl run without it
+    renders a document with that section absent, and writing it over the top
+    deleted a published finding with no warning at all.
+
+    Caught once by reading a diff before committing, which is luck rather than a
+    control and stops working entirely the moment anything runs unattended.
+
+    Compared by heading rather than by length or by content. A crawl legitimately
+    changes every number in the document, so the only thing that reliably marks
+    a section as lost is its heading disappearing.
+    """
+    if not path.exists():
+        return
+
+    def headings(text: str) -> set[str]:
+        return {line.strip() for line in text.splitlines() if line.startswith("## ")}
+
+    lost = headings(path.read_text(encoding="utf-8")) - headings(rendered)
+    if lost:
+        raise ValueError(
+            f"{path} would lose {', '.join(sorted(h.lstrip('# ') for h in lost))}. "
+            "A crawl without --with-code-search cannot produce that section, and "
+            "overwriting would delete a published figure. Run with --with-code-search, "
+            "or move the document aside deliberately."
+        )
 
 
 def _search_sample(search: SearchFn, max_requests: int, moment: datetime) -> Sample:
