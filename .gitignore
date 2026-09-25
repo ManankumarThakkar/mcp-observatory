@@ -31,3 +31,7 @@ default.profraw
 CLAUDE.md
 docs/plans/
 docs/research/
+
+# Built from data/ by `mcp-observatory site`. Derived, so not committed: a
+# checked-in copy can go stale against the findings it describes.
+web/site-data.json

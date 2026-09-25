@@ -51,4 +51,12 @@ class Rule(Protocol):
     title: str
     description: str
 
+    # The languages this rule examines, or ("*",) for a rule that examines
+    # every file. Declared rather than left implicit in `analyze`, because
+    # success criterion 2a states per-language coverage alongside every
+    # aggregate figure: without a declaration, anything publishing coverage
+    # would restate it from reading the source, and that second copy is what
+    # would quietly disagree with the code.
+    languages: tuple[str, ...]
+
     def analyze(self, ctx: FileContext) -> list[Finding]: ...

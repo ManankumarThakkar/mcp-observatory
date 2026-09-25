@@ -30,6 +30,7 @@ from analyzer.fetcher.clone import FetchError, shallow_clone
 from analyzer.orchestrator import CloneFn, ScanFn
 from analyzer.pipeline import CollapsedRun, PipelineResult, publish_from_history, run_pipeline
 from analyzer.report.merge import utc_stamp
+from analyzer.report.site import build_site_data, write_site_data
 from analyzer.scanner import scan_directory
 
 # A directory scanned in place was never cloned, so there is no commit to
@@ -64,6 +65,11 @@ DEFAULT_INDEX_PATH = Path(".cache/server_index.jsonl")
 # repositories a reader can regenerate rather than whichever 2,000 a given
 # night happened to draw. Published wherever a figure drawn from a sample is.
 DEFAULT_SAMPLE_SEED = 20260923
+
+# Derived from data/ and therefore not committed: a checked-in copy can go
+# stale against the findings it describes, and the deploy workflow rebuilds it
+# from the single source every time.
+DEFAULT_SITE_DATA = Path("web/site-data.json")
 
 # Published, and committed. Only findings that cleared the disclosure gate
 # reach here.
@@ -131,6 +137,16 @@ def _build_parser() -> argparse.ArgumentParser:
         "--dry-run",
         action="store_true",
         help="Report what would be published and withheld, and write nothing.",
+    )
+
+    site = subcommands.add_parser(
+        "site", help="Build the dashboard's data from the published findings."
+    )
+    site.add_argument(
+        "--data-dir", default=str(DEFAULT_DATA_DIR), help="Where the published results are."
+    )
+    site.add_argument(
+        "--out", default=str(DEFAULT_SITE_DATA), help="Where to write the page's data."
     )
 
     crawl = subcommands.add_parser(
@@ -374,6 +390,18 @@ def _publish_command(args: argparse.Namespace) -> int:
     return 0
 
 
+def _site_command(args: argparse.Namespace) -> int:
+    """Build the page's data from the published findings."""
+    site = build_site_data(Path(args.data_dir))
+    write_site_data(site, Path(args.out))
+    print(
+        f"{site.findings_total} findings as {site.decisions_total} decisions on "
+        f"{site.servers_affected} servers, {site.withheld} withheld -> {args.out}",
+        file=sys.stderr,
+    )
+    return 0
+
+
 def _crawl(args: argparse.Namespace) -> int:
     search = None
     if args.with_code_search:
@@ -423,6 +451,8 @@ def main(argv: list[str] | None = None) -> int:
             return _scan(args)
         if args.command == "publish":
             return _publish_command(args)
+        if args.command == "site":
+            return _site_command(args)
         return _crawl(args)
     except (
         CollapsedRun,

@@ -35,6 +35,9 @@ def _classify(char: str) -> tuple[str, Confidence] | None:
 class UnicodeConcealRule:
     rule_id = "UNICODE-CONCEAL"
     title = "Characters hidden from human review"
+    # Every language. A codepoint scan needs no parser, which is why this
+    # is the one rule whose coverage is the whole corpus.
+    languages: tuple[str, ...] = ("*",)
     description = (
         "Source contains codepoints that are invisible to a human reader "
         "but are read normally by a language model: tag characters, "
