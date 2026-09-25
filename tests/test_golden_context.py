@@ -266,3 +266,78 @@ def test_a_clone_is_released_even_when_its_scan_fails(tmp_path: Path) -> None:
     )
 
     assert list(tmp_path.rglob("index.ts")) == []
+
+
+def test_a_taint_rule_captures_the_function_that_encloses_its_sink() -> None:
+    """Measured while labelling: a third of SHELL-EXEC-UNSAFE entries could not
+    be decided from twelve lines either side, and every one failed the same
+    way - the sink was visible and the origin of the interpolated value was
+    not. `execSync(cmd)` is undecidable without seeing where cmd came from.
+
+    Twelve lines was measured for probability spread on a decision model, which
+    is a different requirement from decidability by a reader. A taint rule's
+    finding is judged from the function that encloses it, because that is the
+    smallest unit containing both the sink and the parameter feeding it.
+    """
+    from evals.golden.context import capture_for_judgement
+
+    source = "\n".join(
+        ["import { execSync } from 'child_process';", "", "const PREFIX = 'safe';", ""]
+        + [f"// filler {n}" for n in range(20)]
+        + [
+            "export function runTool(userInput: string): string {",
+            "  const cmd = `ls ${userInput}`;",
+            "  return execSync(cmd).toString();",
+            "}",
+        ]
+    )
+    flagged = source.splitlines().index("  return execSync(cmd).toString();") + 1
+
+    captured = capture_for_judgement(source, flagged, suffix=".ts", enclosing=True)
+
+    assert captured is not None
+    assert "function runTool(userInput: string)" in captured, "the origin must be visible"
+    assert "execSync(cmd)" in captured
+
+
+def test_a_window_rule_still_gets_its_window() -> None:
+    """UNICODE-CONCEAL and SCOPE-OVERBROAD are decided from the line and what
+    surrounds it; an enclosing function would add noise, and for a codepoint
+    scan there may be no function at all."""
+    from evals.golden.context import capture_for_judgement
+
+    source = "\n".join(f"line {n}" for n in range(1, 51))
+
+    captured = capture_for_judgement(source, 25, suffix=".ts", enclosing=False)
+
+    assert captured is not None
+    assert "line 13" in captured and "line 37" in captured
+
+
+def test_a_sink_outside_any_function_falls_back_to_the_window() -> None:
+    """Top-level code has no enclosing function, and returning nothing would
+    silently drop the entry rather than judge it."""
+    from evals.golden.context import capture_for_judgement
+
+    source = "\n".join([f"// filler {n}" for n in range(20)] + ["execSync('ls');"])
+
+    captured = capture_for_judgement(source, 21, suffix=".ts", enclosing=True)
+
+    assert captured is not None
+    assert "execSync('ls')" in captured
+
+
+def test_an_enormous_function_is_still_bounded() -> None:
+    """A thousand-line handler would blow past the size cap the presentation
+    layer enforces and cost tokens nobody agreed to."""
+    from evals.golden.context import capture_for_judgement
+
+    body = "\n".join(f"  const x{n} = {n};" for n in range(2000))
+    source = f"function huge() {{\n{body}\n  execSync(cmd);\n}}"
+    flagged = source.splitlines().index("  execSync(cmd);") + 1
+
+    captured = capture_for_judgement(source, flagged, suffix=".ts", enclosing=True)
+
+    assert captured is not None
+    assert len(captured) < 20_000
+    assert "execSync(cmd)" in captured

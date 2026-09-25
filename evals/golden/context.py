@@ -5,9 +5,13 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from tree_sitter import Node
+
 from analyzer.fetcher.clone import CloneTooLarge, FetchError
 from analyzer.models import Finding
 from analyzer.orchestrator import UNREACHABLE_ERRORS, CloneFn, ScanFn
+from analyzer.parsing.trees import parse_source
+from analyzer.rules import ALL_RULES
 from analyzer.scanner import ScanReport
 
 # Exactly the failures that mean "this repository cannot be read", and nothing
@@ -73,6 +77,89 @@ def capture_context(source: str, line: int, *, window: int = CONTEXT_LINES) -> s
     start = max(0, line - window - 1)
     end = min(len(lines), line + window)
     return "\n".join(lines[start:end])
+
+
+# Node types that count as "the function this finding lives in". Arrow
+# functions and method definitions are included because an MCP tool handler is
+# usually one or the other.
+FUNCTION_NODES = frozenset(
+    {
+        "function_declaration",
+        "function_expression",
+        "generator_function_declaration",
+        "arrow_function",
+        "method_definition",
+    }
+)
+
+# A function larger than this is not a judgement aid, it is a wall. Falls back
+# to the line window, which at least centres on the finding.
+MAX_FUNCTION_CHARS = 12_000
+
+# Read from the rules rather than listed here, so a sixth rule arrives with its
+# own answer instead of silently defaulting to the wrong one.
+_NEEDS_FUNCTION = {rule.rule_id: rule.needs_enclosing_function for rule in ALL_RULES}
+
+
+def capture_for_judgement(
+    source: str, line: int, *, suffix: str, enclosing: bool
+) -> str | None:
+    """The context a reader needs to judge one finding.
+
+    Two shapes, because two kinds of rule are judged differently.
+
+    A taint rule - does a value an assistant supplies reach this sink? - cannot
+    be judged from the sink alone. Measured while labelling: a third of
+    SHELL-EXEC-UNSAFE entries were undecidable from twelve lines either side,
+    and every one failed identically, with the sink visible and the origin of
+    the interpolated value outside the window. The enclosing function is the
+    smallest unit that contains both.
+
+    Everything else is judged from the line and what surrounds it. A codepoint
+    scan may sit in no function at all, and a wildcard origin is decided by the
+    object it is declared in rather than by the call stack above it.
+
+    Twelve lines was measured for probability spread on a decision model, which
+    is a different requirement from decidability by a reader. This is the second
+    requirement, measured separately.
+    """
+    if not enclosing:
+        return capture_context(source, line)
+
+    parsed = parse_source(source, suffix)
+    if parsed is None:
+        return capture_context(source, line)
+
+    node = _enclosing_function(parsed.tree.root_node, line)
+    if node is None:
+        # Top-level code has no enclosing function, and dropping the entry
+        # would silently shrink the sample rather than judge it.
+        return capture_context(source, line)
+
+    text = parsed.text(node)
+    if len(text) > MAX_FUNCTION_CHARS:
+        return capture_context(source, line)
+    return text
+
+
+def _enclosing_function(root: Node, line: int) -> Node | None:
+    """The smallest function node containing a one-indexed line."""
+    found: Node | None = None
+    stack = [root]
+    while stack:
+        current = stack.pop()
+        starts, ends = current.start_point[0] + 1, current.end_point[0] + 1
+        if not (starts <= line <= ends):
+            continue
+        # Smallest wins: a handler inside a factory is the useful unit.
+        if current.type in FUNCTION_NODES and (
+            found is None
+            or (current.end_byte - current.start_byte)
+            < (found.end_byte - found.start_byte)
+        ):
+            found = current
+        stack.extend(current.named_children)
+    return found
 
 
 def capture_for_findings(
@@ -159,7 +246,12 @@ def _capture_from(
             result.dropped[finding.finding_id] = f"unreadable: {exc}"
             continue
 
-        captured = capture_context(source, finding.location.line)
+        captured = capture_for_judgement(
+            source,
+            finding.location.line,
+            suffix=Path(finding.location.file).suffix,
+            enclosing=_NEEDS_FUNCTION.get(finding.rule_id, False),
+        )
         if captured is None:
             result.dropped[finding.finding_id] = "line is past the end of the file"
             continue

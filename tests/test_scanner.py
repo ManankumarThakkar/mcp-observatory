@@ -16,6 +16,7 @@ class _recorder:
     title = "Records the contexts it was handed"
     description = "A test double, never registered in ALL_RULES."
     languages: tuple[str, ...] = ("*",)
+    needs_enclosing_function = False
 
     def __init__(self, seen: list[FileContext]) -> None:
         self._seen = seen

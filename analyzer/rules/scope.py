@@ -286,6 +286,7 @@ class ScopeOverbroadRule:
     # TypeScript and JavaScript, which the tsx grammar reads as one
     # family. The gate below uses this rather than a second copy of it.
     languages: tuple[str, ...] = ("typescript", "tsx")
+    needs_enclosing_function = False
     description = (
         "The server listens on every network interface, accepts every web "
         "origin, or treats the home directory or filesystem root as the "

@@ -20,6 +20,7 @@ class _StubRule:
     title = "A stub"
     description = "Exists only to prove the protocol can be satisfied."
     languages: tuple[str, ...] = ("*",)
+    needs_enclosing_function = False
 
     def analyze(self, ctx: FileContext) -> list[Finding]:
         return [
@@ -112,3 +113,30 @@ def test_a_parsed_rule_declining_a_language_it_declares_would_be_caught() -> Non
             # Must not raise and must not refuse outright; an empty result on
             # clean code is correct, an exception is not.
             assert rule.analyze(ctx) == []
+
+
+def test_every_rule_declares_what_a_reader_needs_to_judge_it() -> None:
+    """Measured while labelling: a third of SHELL-EXEC-UNSAFE findings could
+    not be decided from twelve lines either side, because the sink was visible
+    and the origin of the value was not. A taint rule is judged from the
+    function enclosing its sink; a codepoint scan is judged from the line.
+
+    Declared on the rule rather than listed in the eval harness, because it is
+    a fact about what the rule claims - and a harness-side list would not gain
+    an entry when a sixth rule arrives.
+    """
+    for rule in ALL_RULES:
+        assert isinstance(rule.needs_enclosing_function, bool), rule.rule_id
+
+
+def test_the_taint_rules_are_the_ones_needing_a_function() -> None:
+    """A rule asking whether a value reaches a sink needs both ends visible.
+    A rule asking what a piece of text says does not, and an enclosing
+    function would bury the text it is about."""
+    needs = {r.rule_id: r.needs_enclosing_function for r in ALL_RULES}
+
+    assert needs["SHELL-EXEC-UNSAFE"] is True
+    assert needs["PATH-TRAVERSAL"] is True
+    assert needs["TOOL-DESC-INJECTION"] is False
+    assert needs["SCOPE-OVERBROAD"] is False
+    assert needs["UNICODE-CONCEAL"] is False
