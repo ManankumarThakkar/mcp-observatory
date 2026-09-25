@@ -412,3 +412,57 @@ def test_the_capture_returns_both_contexts_for_a_taint_finding(tmp_path: Path) -
     assert finding.finding_id in result.functions
     assert "userInput" not in result.contexts[finding.finding_id]
     assert "function runTool(userInput: string)" in result.functions[finding.finding_id]
+
+
+def test_a_sibling_function_on_the_flagged_line_is_not_mistaken_for_the_enclosing_one() -> None:
+    """Found in captured data, and it would have corrupted the experiment.
+
+    A finding carries a line but no column, so every function node overlapping
+    that line is a candidate, and "smallest wins" then actively prefers the
+    wrong one. Here an inline `.catch(() => null)` sits on the flagged line, so
+    the smallest overlapping function is ten characters of unrelated code that
+    cannot contain a path traversal at all. Forty-five of a hundred and
+    seventeen captured functions came out smaller than the line window this way,
+    and each would have been presented to a labeller as the finding's enclosing
+    scope: an undecidable entry produced by the instrument rather than by the
+    code.
+    """
+    source = (
+        "export async function writeKey(args) {\n"
+        "  const fileAbs = path.join(base, args.name);\n"
+        '  const existing = await fs.readFile(fileAbs, "utf8").catch(() => null);\n'
+        "  return existing;\n"
+        "}"
+    )
+    from evals.golden.context import capture_for_judgement
+
+    captured = capture_for_judgement(source, 3, suffix=".ts", enclosing=True)
+
+    assert captured is not None
+    assert "() => null" != captured.strip()
+    # Not "export async ...": the `export` keyword belongs to an enclosing
+    # export_statement, so the function node starts at `async`.
+    assert captured.strip().startswith("async function writeKey")
+    assert "args.name" in captured, "the origin of the tainted value must be present"
+
+
+def test_a_handler_occupying_the_whole_flagged_line_is_still_chosen() -> None:
+    """The guard against over-correcting the sibling fix.
+
+    Requiring a candidate to cover the flagged line must not reject a genuine
+    one-line handler, which is a common shape in MCP servers and is exactly the
+    unit wanted. If this fails, the fix has traded a wrong small context for a
+    needlessly large one.
+    """
+    source = (
+        "server.tool(\n"
+        '  "read",\n'
+        "  async (args) => fs.readFile(path.join(base, args.name)),\n"
+        ");"
+    )
+    from evals.golden.context import capture_for_judgement
+
+    captured = capture_for_judgement(source, 3, suffix=".ts", enclosing=True)
+
+    assert captured is not None
+    assert captured.strip().startswith("async (args) =>")

@@ -134,7 +134,7 @@ def capture_for_judgement(
     if parsed is None:
         return capture_context(source, line)
 
-    node = _enclosing_function(parsed.tree.root_node, line)
+    node = _enclosing_function(parsed.tree.root_node, line, source=source)
     if node is None:
         # Top-level code has no enclosing function, and dropping the entry
         # would silently shrink the sample rather than judge it.
@@ -164,15 +164,54 @@ def both_contexts(source: str, line: int, *, suffix: str) -> tuple[str | None, s
     parsed = parse_source(source, suffix)
     if parsed is None:
         return narrow, None
-    node = _enclosing_function(parsed.tree.root_node, line)
+    node = _enclosing_function(parsed.tree.root_node, line, source=source)
     if node is None:
         return narrow, None
     text = parsed.text(node)
     return narrow, text if len(text) <= MAX_FUNCTION_CHARS else None
 
 
-def _enclosing_function(root: Node, line: int) -> Node | None:
-    """The smallest function node containing a one-indexed line."""
+def _enclosing_function(root: Node, line: int, *, source: str) -> Node | None:
+    """The smallest function node that encloses a one-indexed line.
+
+    "Encloses" rather than "overlaps", and the distinction is the whole
+    function. A finding carries a line but no column, so every function node
+    touching that line is a candidate, and taking the smallest then prefers a
+    subexpression of the line over the scope that contains it. Measured on
+    captured data: an inline `.catch(() => null)` beside a path call made ten
+    characters of unrelated code the "enclosing function" for that finding, and
+    forty-five of a hundred and seventeen captured functions came out smaller
+    than the line window this way. Each would have reached a labeller as the
+    finding's scope, producing an undecidable entry that says nothing about the
+    code.
+
+    So a candidate must begin at or before the flagged line's first
+    non-whitespace character. A function that opens partway along the line is a
+    fragment of it, and cannot be the scope the line sits in.
+
+    Only the start is checked, deliberately. Every failure observed in captured
+    data was a function opening mid-line; requiring it to also reach the line's
+    last character instead rejected a genuine one-line handler, because the
+    trailing comma in `async (args) => read(args.p),` belongs to the call around
+    it rather than to the handler. Guarding a shape that has not appeared, at the
+    cost of one that has, is the wrong trade. One gap remains in principle: a
+    finding in the tail of a line that opens with a short unrelated function.
+    Rather than assert it does not occur, the capture reports any function it
+    returns that is a small fraction of its window, so that shape surfaces as a
+    number instead of as a quietly undecidable entry.
+
+    The cost is a signature line. In `server.tool("x", async (a) => {` the
+    handler starts mid-line, so a finding on that line rejects it and falls back
+    to the function above or to the window. That is deliberate. The failure mode
+    becomes too much context rather than the wrong context, and only one of
+    those quietly corrupts a judgement.
+    """
+    lines = source.splitlines()
+    if not (1 <= line <= len(lines)):
+        return None
+    text = lines[line - 1]
+    first = len(text) - len(text.lstrip())
+
     found: Node | None = None
     stack = [root]
     while stack:
@@ -180,15 +219,26 @@ def _enclosing_function(root: Node, line: int) -> Node | None:
         starts, ends = current.start_point[0] + 1, current.end_point[0] + 1
         if not (starts <= line <= ends):
             continue
-        # Smallest wins: a handler inside a factory is the useful unit.
-        if current.type in FUNCTION_NODES and (
-            found is None
-            or (current.end_byte - current.start_byte)
-            < (found.end_byte - found.start_byte)
+        # Smallest wins among candidates that genuinely enclose the line: a
+        # handler inside a factory is the useful unit.
+        if (
+            current.type in FUNCTION_NODES
+            and _opens_at_or_before(current, line, first=first)
+            and (
+                found is None
+                or (current.end_byte - current.start_byte)
+                < (found.end_byte - found.start_byte)
+            )
         ):
             found = current
         stack.extend(current.named_children)
     return found
+
+
+def _opens_at_or_before(node: Node, line: int, *, first: int) -> bool:
+    """Whether a node begins at or before the flagged line's first code character."""
+    start_row, start_col = node.start_point
+    return start_row + 1 < line or (start_row + 1 == line and start_col <= first)
 
 
 def capture_for_findings(
