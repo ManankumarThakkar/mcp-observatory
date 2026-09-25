@@ -216,6 +216,13 @@ can go.*
 | A calibrated judgement above 0.5 | 0.89 | 0.94 |
 | A calibrated judgement above 0.7 | 0.92 | 0.66 |
 
+> **Not reproducible from this repository.** The 43 labels were not retained.
+> The pilot predates `evals/golden/`, and its judgements existed only in the
+> session that made them, so nothing here lets a reader recompute 0.81. Treat it
+> as indicative. The replacement is the 288-entry set in
+> `.cache/golden-entries.jsonl`, whose entries, source windows and labels are all
+> written to a file for exactly this reason.
+
 **This is a pilot, not the accuracy figure this project exists to publish.**
 Three weaknesses, stated because a figure whose limits are known is worth more
 than a better one that hides them:

@@ -1,6 +1,7 @@
 """The nightly run: crawl output in, published findings out."""
 
 import json
+from collections import Counter
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
@@ -208,7 +209,7 @@ def run_pipeline(
         published=published_count,
         withheld=counts["withheld"] + counts["opted_out"],
     )
-    _write_summary(summary_path, result, counts, stamp, tool_version, intake)
+    _write_summary(summary_path, result, counts, stamp, tool_version, intake, merged)
     return result
 
 
@@ -348,12 +349,16 @@ def publish_from_history(
         now=now,
         tool_version=tool_version,
     )
-    _stamp_publication(summary_path, counts, utc_stamp(now), tool_version)
+    _stamp_publication(summary_path, counts, utc_stamp(now), tool_version, merged)
     return PublishResult(published=published, withheld=counts["withheld"] + counts["opted_out"])
 
 
 def _stamp_publication(
-    path: Path, counts: Mapping[str, int], stamp: str, tool_version: str
+    path: Path,
+    counts: Mapping[str, int],
+    stamp: str,
+    tool_version: str,
+    merged: Sequence[Mapping[str, Any]],
 ) -> None:
     """Update the disclosure counts and date the publication, keeping the scan.
 
@@ -376,6 +381,12 @@ def _stamp_publication(
             "published_at": stamp,
             "tool_version": tool_version,
             "disclosure": dict(counts),
+            # Recomputed here as well as in a scan, so a republication after a
+            # window closes keeps the per-rule totals current rather than
+            # leaving the dashboard describing an older run.
+            "found_by_rule": dict(
+                sorted(Counter(str(record["rule_id"]) for record in merged).items())
+            ),
         }
     )
     # generated_at is deliberately never defaulted to now. It describes the
@@ -392,6 +403,7 @@ def _write_summary(
     stamp: str,
     tool_version: str,
     intake: Intake,
+    merged: Sequence[Mapping[str, Any]],
 ) -> None:
     """Publish the numbers even when the findings behind them are withheld.
 
@@ -410,6 +422,14 @@ def _write_summary(
         "skipped": result.skipped,
         "failed": result.failed,
         "disclosure": dict(counts),
+        # How many findings each rule produced, published or not. Aggregate and
+        # non-attributable, which is the category SECURITY.md publishes
+        # immediately - and without it the dashboard's per-rule table is four
+        # rows of zeros, which reads as a scanner that finds nothing rather than
+        # one whose findings are being withheld in full.
+        "found_by_rule": dict(
+            sorted(Counter(str(record["rule_id"]) for record in merged).items())
+        ),
     }
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")

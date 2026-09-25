@@ -23,9 +23,9 @@ SITE = SiteData(
     by_severity={"medium": 322},
     rules=(
         RuleSummary("SCOPE-OVERBROAD", "Server reach wider than its tools require", "Wide reach.",
-                    ("typescript", "tsx"), 322, 164, 145),
+                    ("typescript", "tsx"), 322, 322, 164, 145),
         RuleSummary("TOOL-DESC-INJECTION", "Instructions planted in tool metadata", "Planted text.",
-                    ("typescript", "tsx"), 0, 0, 0),
+                    ("typescript", "tsx"), 590, 0, 0, 0),
     ),
     coverage=(
         CoverageRow("SCOPE-OVERBROAD", "Server reach wider than its tools require", ("typescript", "tsx")),

@@ -1,21 +1,26 @@
 # MCP Security Observatory
 
 ![Python](https://img.shields.io/badge/python-3.11%2B-blue)
-![Tests](https://img.shields.io/badge/tests-389%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-624%20passing-brightgreen)
 ![Checks](https://img.shields.io/badge/ruff%20%7C%20mypy-clean-brightgreen)
-![Status](https://img.shields.io/badge/status-pre--launch-orange)
+![License](https://img.shields.io/badge/license-MIT-blue)
 
-**A public risk index for MCP servers, published with an honest measure of how
-often it is wrong.**
+**A public risk index for MCP servers, built so that its own error rate can be
+measured and published beside it.**
+
+### → [manankumarthakkar.github.io/mcp-observatory](https://manankumarthakkar.github.io/mcp-observatory/)
 
 AI assistants load plugins called MCP servers. They run on your machine, with
 your privileges, and most editors start them automatically when you open a
 project. There is no sandbox and no review. This reads them without running a
 single line of them.
 
-> **Pre-launch.** Being built in the open. No ecosystem-wide numbers are
-> published yet, and this page will not claim any until they exist. What *has*
-> been measured is below, with its limits stated.
+> **What is live, stated precisely.** 1,643 servers scanned from a reproducible
+> sample of a 21,492-repository corpus. 1,296 findings, of which 323 are
+> published and 973 are withheld pending disclosure. **Accuracy has not been
+> measured yet:** 288 findings are drawn and captured for hand-labelling and none
+> are labelled, so every published finding is a candidate rather than a confirmed
+> problem. [What is not built yet](#-what-is-not-built-yet) lists the rest.
 
 ---
 
@@ -28,6 +33,7 @@ single line of them.
 - [⭐ What is different about this one](#-what-is-different-about-this-one)
 - [🏗️ How it works](#-how-it-works)
 - [⚡ Running it](#-running-it)
+- [🚧 What is not built yet](#-what-is-not-built-yet)
 - [🗺️ Where it stands](#-where-it-stands)
 - [📁 Repository layout](#-repository-layout)
 - [🛡️ Principles](#-principles)
@@ -39,8 +45,8 @@ single line of them.
 | You are | What you get |
 | --- | --- |
 | **A developer installing MCP servers** | A way to check whether a plugin you are about to give filesystem and shell access is safe, and how much to trust that answer. |
-| **An MCP server maintainer** | Findings about your own server, sent to you privately before they are published anywhere. |
-| **A security researcher** | An open, randomly sampled, hand-labelled benchmark of real findings, plus a scoring script, so any scanner can be measured on the same footing. |
+| **An MCP server maintainer** | A page for your own server, and a policy that withholds every high and critical finding until you have been notified. *Notification is not built yet, which is why nothing above medium is published at all.* |
+| **A security researcher** | A scoring script, a published sampling method, and 288 findings drawn at random and captured for labelling. *The labels do not exist yet, so the benchmark is a method and a corpus, not yet an answer key.* |
 | **Anyone curious how this is built** | An engineering log of every decision and what it cost, and a methodology page where every published number shows its working. |
 
 You do **not** need to know what MCP is to read the next section.
@@ -62,13 +68,14 @@ must **never run** in order to inspect it.
 
 And the ecosystem is bigger than anyone says. Published counts disagree by a
 factor of eight, because a registry entry is a *registered name*, not a server.
-A crawl on 2026-09-21 found:
+A crawl on 2026-09-23 found:
 
 ```
-34,630  registry entries
- 8,004  no source to read       (hosted services)
- 5,270  duplicates of a repository already counted
-21,356  distinct repositories   <- what we actually scan
+35,009  registry entries
+ 8,117  no source to read       (hosted services)
+ 5,400  duplicates of a repository already counted
+21,492  distinct repositories   <- the corpus
+ 1,643  scanned so far          (a reproducible 2,000-repo sample, seed 20260923)
 ```
 
 One account alone holds **2,332 registered names pointing at a single
@@ -123,10 +130,22 @@ by hand by reading the code.
 | Only findings the rules call high confidence | 0.62 | 0.14 |
 | A calibrated judgement above 0.5 | 0.89 | 0.94 |
 
-**This is a pilot, not the accuracy figure this project exists to publish.**
-The sample is concentrated (22 of 43 findings come from one repository), and
-the same project wrote both the rules and the labels — which is exactly the
-weakness we criticise in figures published elsewhere.
+**This is a pilot, not the accuracy figure this project exists to publish, and
+you cannot reproduce it from this repository.** Three limits, the third of which
+is the worst:
+
+1. The sample is concentrated: 22 of 43 findings come from one repository.
+2. The same project wrote both the rules and the labels, which is exactly the
+   weakness we criticise in figures published elsewhere.
+3. **The 43 labels were not retained.** The pilot predates the golden-set
+   machinery, and its judgements existed only in the session that made them. The
+   figure is therefore indicative and unverifiable, which by this project's own
+   standard makes it worth less than it looks.
+
+That third limit is why the current pipeline captures each finding's source
+window to a file, assigns stable ids, writes after every keystroke and preserves
+labels across a re-draw. A measurement whose inputs are not kept is a story about
+a measurement.
 
 **The most useful result was about us.** Our own "high confidence" flag scored
 *worse* than reporting everything. It means "the taint path is unambiguous",
@@ -150,20 +169,25 @@ well below perfect here. A perfect score is usually a sign the measurement was
 circular.
 
 **📈 A trend over time.** Existing tools give a snapshot. Nobody can currently
-answer whether this ecosystem is getting safer. This runs nightly and keeps the
-history.
+answer whether this ecosystem is getting safer. The series is designed to be one
+appended point per night and the scheduled job is written but not yet merged, so
+**there is one point so far.** A trend needs time and cannot be backfilled.
 
-**🔒 Disclosure before publication.** Serious findings are withheld and sent
-privately to the maintainer first — enforced in code, not promised in a policy
-document.
+**🔒 Disclosure before publication.** Every high and critical finding is
+withheld by a gate in `analyzer/report/`, enforced in code rather than promised
+in a document — a finding cannot reach `data/` in a publishable state without
+passing it. **The notification half is not built.** Since a window opens only
+when a notification is recorded, nothing above medium has ever been published,
+which is the gate failing closed.
 
 **💰 A published cost per server.** Most checks never call a model. "It's
 cheap" is an adjective; a number you can check is not.
 
-The labelled corpus ships as an **open benchmark with a scoring script**, so
-any scanner can be measured on the same footing rather than quoting a number
-from its own private collection. A result showing the ecosystem is healthier
-than reported is just as publishable as an alarming one.
+The labelled corpus is intended to ship as an **open benchmark with a scoring
+script**, so any scanner can be measured on the same footing rather than quoting
+a number from its own private collection. The script and the sampling method
+exist; the labels do not. A result showing the ecosystem is healthier than
+reported is just as publishable as an alarming one.
 
 ---
 
@@ -182,15 +206,29 @@ flowchart TD
 
     A --> B --> C --> D
     D -- yes --> F
-    D -- no --> E --> F
+    D -. "not wired yet" .-> E
+    E -. "not wired yet" .-> F
     F --> G
     E -.->|scored against| H
-    H -.->|precision per rule| G
+    H -.->|"no labels yet"| G
+
+    classDef unbuilt stroke-dasharray: 5 4
+    class E,H unbuilt
 ```
 
+Solid edges are paths a scan takes today. Dashed edges and dashed boxes are
+built and tested in isolation but not yet connected: every finding currently
+reaches the report from the rules alone.
+
 Each stage writes a file, so any stage can be run, tested and replaced on its
-own. The scoring loop on the right produces the published accuracy figure, and
-it gates every pull request.
+own.
+
+**Two parts of this diagram are not wired yet, and the diagram marks them
+dashed.** Triage is built and tested but the pipeline does not call it, so today
+every finding reaches the report from the rules alone. The scoring loop is
+built and does not gate pull requests, because it has no labels to score
+against. CI runs the test suite, ruff and mypy on every pull request; it does
+not yet check accuracy.
 
 ---
 
@@ -250,6 +288,22 @@ mypy             # types
 
 ---
 
+## 🚧 What is not built yet
+
+Listed because a reviewer will find these anyway, and finding them listed is a
+different experience from finding them contradicted.
+
+| Not built | Consequence today | Why it is not done |
+| --- | --- | --- |
+| **Hand labels for the golden set** | No accuracy figure. 288 findings are drawn and captured; none are labelled. | It is hours of careful human judgement and cannot be delegated to a model without making the measurement circular. |
+| **Maintainer notification** | No disclosure window has ever opened, so every high and critical finding is withheld indefinitely and the index shows one rule of five. | Needs contact discovery, sending, rate limits, and a human deciding what the message says. |
+| **Triage wired into the pipeline** | Findings reach the report from the rules alone; no model adjudicates in a real run. | The adjudicators, cache and spend guard are built and tested. Wiring them in without labels would spend money on judgements nobody can score. |
+| **An accuracy gate in CI** | CI checks tests, lint and types, not precision. | A required check with nothing behind it blocks every pull request forever. It gets added when there is a baseline to compare against. |
+| **The nightly job** | One point in the time series. | Written, not merged. |
+| **Python rules** | Four of five rules read TypeScript and JavaScript only. The character rule reads every language. | Rules are not translations of each other; the taint analysis differs per language. Stated per figure rather than averaged away. |
+
+---
+
 ## 🗺️ Where it stands
 
 | Stage | Status |
@@ -257,11 +311,19 @@ mypy             # types
 | Analyzer core, fetcher, rule contract, CI | ✅ Done |
 | Registry crawler + coverage reporting | ✅ Done |
 | Discovery of unregistered servers | ✅ Done |
-| Scan orchestrator, 35,050 repos in ~2 hours | ✅ Done |
-| Detection rules | ✅ 5 of 5 |
-| SARIF output, disclosure gate, nightly pipeline | ✅ Done |
-| Model adjudication + published accuracy | ⏳ Next |
-| Public dashboard | ⏳ Planned |
+| Scan orchestrator, measured at 3.1 hours for 21,492 repos | ✅ Done |
+| Detection rules | ✅ 5 of 5, TypeScript and JavaScript |
+| SARIF output, disclosure gate | ✅ Done, enforced in code |
+| Public dashboard, deployed | ✅ [Live](https://manankumarthakkar.github.io/mcp-observatory/) |
+| Adjudicators, cache, spend guard, scoring script | ✅ Built, ⏳ not wired into a run |
+| Nightly job and the time series | ⏳ Written, not merged. One point so far |
+| Hand labels, and the accuracy figure they produce | ⏳ Not started. 288 entries drawn |
+| Maintainer notification | ⏳ Not started. Nothing above medium publishes without it |
+
+The earlier version of this table said "nightly pipeline ✅ Done" and "public
+dashboard ⏳ Planned", which was wrong in both directions at once. Status tables
+rot faster than anything else in a README, which is why this one now names what
+is unwired rather than only what exists.
 
 ---
 
