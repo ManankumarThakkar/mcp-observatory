@@ -193,3 +193,87 @@ def test_an_unknown_rule_is_refused_rather_than_filed_as_control() -> None:
 
     with pytest.raises(KeyError):
         split_by_prediction([{"entry_id": "a", "rule_id": "NO-SUCH-RULE"}])
+
+
+def _probed(entry_id: str, window: float | None, function: float | None) -> dict[str, object]:
+    probabilities: dict[str, object] = {}
+    if window is not None:
+        probabilities["window"] = window
+    if function is not None:
+        probabilities["function"] = function
+    return {"entry_id": entry_id, "rule_id": "SHELL-EXEC-UNSAFE", "probabilities": probabilities}
+
+
+def test_decisiveness_is_distance_from_the_undecided_midpoint() -> None:
+    """A calibrated model says "I cannot tell" by answering near one half, so
+    the distance from one half is how decidable the finding was. Measuring it
+    directly avoids inventing an unsure band and publishing a threshold the
+    experiment would then depend on."""
+    from evals.harness.experiment import decisiveness
+
+    assert decisiveness(0.5) == 0.0
+    assert decisiveness(0.95) == pytest.approx(0.45)
+    assert decisiveness(0.05) == pytest.approx(0.45)
+
+
+def test_a_one_sided_shift_in_decisiveness_is_reported_as_unlikely_by_chance() -> None:
+    """The main effect, and the reason it needs no ground truth: if the wider
+    context makes the adjudicator more decisive on the same findings, that is
+    measurable without anyone knowing which findings are real."""
+    from evals.harness.experiment import paired_decisiveness
+
+    entries = [_probed(f"e{n}", window=0.52, function=0.95) for n in range(10)]
+
+    effect = paired_decisiveness(entries)
+
+    assert effect.n == 10
+    assert effect.more_decisive == 10
+    assert effect.less_decisive == 0
+    assert effect.p_value < 0.01
+    assert effect.median_function > effect.median_window
+
+
+def test_no_movement_reports_no_evidence_rather_than_a_significant_result() -> None:
+    """The expected outcome for the control group. A test that a null result
+    reads as a null result, because a sign test over zero untied pairs is the
+    shape most likely to produce a divide-by-zero dressed as certainty."""
+    from evals.harness.experiment import paired_decisiveness
+
+    entries = [_probed(f"e{n}", window=0.8, function=0.8) for n in range(10)]
+
+    effect = paired_decisiveness(entries)
+
+    assert effect.n == 10
+    assert effect.more_decisive == 0 and effect.less_decisive == 0
+    assert effect.p_value == 1.0
+
+
+def test_an_entry_judged_under_one_condition_only_is_excluded() -> None:
+    """Paired throughout: an unpaired entry would compare two different samples
+    and report the difference as a context effect."""
+    from evals.harness.experiment import paired_decisiveness
+
+    entries = [
+        _probed("a", window=0.52, function=0.95),
+        _probed("b", window=0.52, function=None),
+        _probed("c", window=None, function=0.95),
+    ]
+
+    assert paired_decisiveness(entries).n == 1
+
+
+def test_the_effect_is_reported_with_its_direction_split_not_only_a_p_value() -> None:
+    """A p-value with no counts hides a result driven by two entries out of a
+    hundred. The counts are what a reader needs to judge whether the effect is
+    worth anything."""
+    from evals.harness.experiment import paired_decisiveness
+
+    entries = [
+        _probed("a", window=0.52, function=0.95),
+        _probed("b", window=0.95, function=0.52),
+        _probed("c", window=0.52, function=0.99),
+    ]
+
+    effect = paired_decisiveness(entries)
+
+    assert (effect.more_decisive, effect.less_decisive, effect.tied) == (2, 1, 0)

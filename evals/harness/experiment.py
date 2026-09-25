@@ -15,6 +15,8 @@ entries that become decidable under the wider context are counted separately,
 and their composition is the finding.
 """
 
+import math
+import statistics
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
@@ -202,3 +204,95 @@ def split_by_prediction(
             raise KeyError(f"no rule declares {rule_id}, so its prediction is unknown")
         (predicted if _PREDICTED[rule_id] else control).append(entry)
     return predicted, control
+
+
+# The point a calibrated answer carries no information. A model that cannot tell
+# from what it was shown answers here, which is what makes distance from it a
+# measure of how decidable the finding was.
+UNDECIDED = 0.5
+
+
+def decisiveness(probability: float) -> float:
+    """How far a calibrated answer is from carrying no information.
+
+    Used instead of an unsure band, and deliberately. Discretising a probability
+    into real, not real and unsure needs two thresholds, and the experiment's
+    result would then depend on where they were put - a reader could move them
+    and move the finding. Distance from one half needs no threshold, uses the
+    whole range, and is the quantity a calibrated model is actually reporting.
+    """
+    return abs(probability - UNDECIDED)
+
+
+@dataclass(frozen=True)
+class PairedEffect:
+    """A within-entry comparison of decisiveness under the two conditions.
+
+    The counts are reported beside the p-value because a p-value alone hides
+    whether an effect rests on two entries or on ninety. The medians are reported
+    because a direction with no magnitude cannot be argued about.
+    """
+
+    n: int
+    median_window: float
+    median_function: float
+    more_decisive: int
+    less_decisive: int
+    tied: int
+    p_value: float
+
+
+def paired_decisiveness(entries: Sequence[Mapping[str, Any]]) -> PairedEffect:
+    """Whether the enclosing function makes the adjudicator more decisive.
+
+    The main effect, and the reason the experiment is affordable: it needs no
+    ground truth. Whether a wider context lets a judge answer at all is a
+    different question from whether the answer is right, and only the second
+    needs labels. So this runs over every paired entry, and hand labelling is
+    spent only on establishing which way the bias points.
+
+    Paired per entry, so the same findings are compared under both conditions
+    and a difference cannot be a difference of sample.
+
+    A sign test rather than a t-test: decisiveness is bounded at zero and one
+    half and is nowhere near normal, and the question asked here is only which
+    direction entries moved. It is exact, needs no distributional assumption,
+    and needs no dependency beyond the standard library.
+    """
+    pairs = []
+    for entry in entries:
+        probabilities = entry.get("probabilities") or {}
+        if not isinstance(probabilities, Mapping):
+            continue
+        window, function = probabilities.get("window"), probabilities.get("function")
+        if not isinstance(window, int | float) or not isinstance(function, int | float):
+            continue
+        pairs.append((decisiveness(float(window)), decisiveness(float(function))))
+
+    more = sum(1 for before, after in pairs if after > before)
+    less = sum(1 for before, after in pairs if after < before)
+    return PairedEffect(
+        n=len(pairs),
+        median_window=statistics.median([before for before, _ in pairs]) if pairs else 0.0,
+        median_function=statistics.median([after for _, after in pairs]) if pairs else 0.0,
+        more_decisive=more,
+        less_decisive=less,
+        tied=len(pairs) - more - less,
+        p_value=_sign_test(more, less),
+    )
+
+
+def _sign_test(more: int, less: int) -> float:
+    """Two-sided exact sign test over the entries that moved.
+
+    Ties carry no directional information and are excluded, which is the
+    standard treatment. With nothing untied the answer is 1.0: no evidence,
+    rather than the divide-by-zero certainty this shape invites.
+    """
+    untied = more + less
+    if untied == 0:
+        return 1.0
+    smaller = min(more, less)
+    ways = sum(math.comb(untied, i) for i in range(smaller + 1))
+    tail = ways / float(2**untied)
+    return min(1.0, 2.0 * tail)
