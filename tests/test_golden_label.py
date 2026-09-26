@@ -13,6 +13,7 @@ from evals.golden.label import (
     observe,
     progress,
     published_label,
+    record_truth,
     render,
 )
 
@@ -343,3 +344,61 @@ def test_a_contested_finding_is_identifiable_not_merely_unlabelled() -> None:
 
     assert is_contested(entries[1])
     assert not is_contested(entries[0])
+
+
+def test_ground_truth_is_recorded_straight_to_the_file(tmp_path: Path) -> None:
+    """A judgement made outside the interactive loop still has to be durable.
+
+    The loop reads single keystrokes, which suits a person at a terminal and
+    suits nothing else. Ground truth for the contested findings is established by
+    reading code carefully rather than by pressing keys quickly, so it needs a way
+    in that is not a TTY - and it must write immediately, for the same reason the
+    loop does: work that is lost is work done twice.
+    """
+    path = tmp_path / "entries.jsonl"
+    path.write_text(
+        json.dumps({"entry_id": "g-0001", "rule_id": "SHELL-EXEC-UNSAFE", "label": None})
+        + "\n"
+        + json.dumps({"entry_id": "g-0002", "rule_id": "PATH-TRAVERSAL", "label": None})
+        + "\n",
+        encoding="utf-8",
+    )
+
+    record_truth(path, "g-0002", "true_positive", reason="the caller passes tool input")
+
+    written = [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+    assert written[1]["label"] == "true_positive"
+    # `reason`, the field the schema already uses, not a second name for it.
+    assert written[1]["reason"] == "the caller passes tool input"
+    assert written[1]["labelled_by"] == "human"
+    assert written[0]["label"] is None, "only the named entry is touched"
+
+
+def test_ground_truth_requires_a_reason(tmp_path: Path) -> None:
+    """The interactive loop lets a person press one key without explaining, on
+    the grounds that they have already spent the attention. That does not hold
+    here: these are the findings two contexts disagreed about, they are the ones a
+    reader is most likely to challenge, and a label nobody can argue with
+    individually is a label nobody can check.
+    """
+    path = tmp_path / "entries.jsonl"
+    path.write_text(
+        json.dumps({"entry_id": "g-0001", "rule_id": "SHELL-EXEC-UNSAFE", "label": None}) + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="reason"):
+        record_truth(path, "g-0001", "true_positive", reason="   ")
+
+
+def test_recording_ground_truth_refuses_an_unknown_entry(tmp_path: Path) -> None:
+    """Doing nothing looks exactly like success, and the entry would simply be
+    left unlabelled while the count said otherwise."""
+    path = tmp_path / "entries.jsonl"
+    path.write_text(
+        json.dumps({"entry_id": "g-0001", "rule_id": "SHELL-EXEC-UNSAFE", "label": None}) + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(KeyError):
+        record_truth(path, "g-9999", "true_positive", reason="x")

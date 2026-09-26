@@ -20,6 +20,7 @@ from evals.harness.experiment import (
     record_probabilities,
     record_verdicts,
     split_by_prediction,
+    truth_agreement,
 )
 
 # Every entry, under both conditions, with room for a re-run. Set from the
@@ -207,6 +208,43 @@ def main(argv: Sequence[str] | None = None) -> int:
         "finding is not the same as an unjudged one: it needs a human to break a "
         "tie between two judgements that already exist."
     )
+
+    # Which context was right, where the choice changed the answer. Decisiveness
+    # cannot answer this: a judge can move from confidently wrong to confidently
+    # right without its confidence changing.
+    agreement = truth_agreement(entries)
+    if agreement.n:
+        print(
+            f"\nAgainst ground truth, on the {agreement.n} findings where the two "
+            f"contexts disagree and a human has settled it "
+            f"({agreement.servers} servers):"
+        )
+        print(
+            f"  enclosing function correct {agreement.function_correct}/{agreement.n}"
+            f"   narrow window correct {agreement.window_correct}/{agreement.n}"
+            f"   p = {agreement.p_value:.4f}"
+        )
+        print(
+            f"  really vulnerable: {agreement.really_vulnerable} of {agreement.n} - "
+            "a disagreement is mostly a sign the finding is not real"
+        )
+        print(
+            f"  window errors:   accepted {agreement.window_credulous} unreal as real, "
+            f"rejected {agreement.window_missed} real"
+            f"   (asymmetry p = {agreement.window_credulity_p_value:.5f})"
+        )
+        print(
+            f"  function errors: accepted {agreement.function_credulous} unreal as real, "
+            f"rejected {agreement.function_missed} real"
+            f"   (asymmetry p = {agreement.function_credulity_p_value:.5f})"
+        )
+        print(
+            "  The error direction, not the accuracy gap, is the result: a narrow "
+            "window hides the guard rather than the vulnerability, so it errs by "
+            "believing findings that are not real. That biases a precision measured "
+            "under it upward, which is the reverse of the original hypothesis. "
+            "Nothing here estimates overall precision - the set is selected."
+        )
     return 0
 
 

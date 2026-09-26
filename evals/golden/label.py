@@ -266,6 +266,40 @@ def _write(path: Path, entries: Sequence[Mapping[str, Any]]) -> None:
     )
 
 
+def record_truth(path: Path, entry_id: str, label: str, *, reason: str) -> None:
+    """Record one ground-truth judgement for one entry, and write immediately.
+
+    A way in that is not a terminal. The interactive loop reads single keystrokes,
+    which suits a person sitting at a TTY and suits nothing else; ground truth for
+    the contested findings is established by reading code carefully rather than by
+    pressing keys quickly.
+
+    Ground truth goes in `label` rather than under a condition, because it is
+    condition-independent: it is established from whatever it takes to answer, not
+    from one of the two views under test. That is also why each contested finding
+    needs judging once rather than twice, which removes the contamination of
+    judging the same code a second time while remembering the first verdict.
+
+    A reason is required here even though the interactive loop does not require one
+    from a person. The loop's asymmetry rests on a person having already spent the
+    attention by looking; that argument does not carry to the contested findings,
+    which are precisely the ones a reader is most likely to challenge. A label
+    nobody can argue with individually is a label nobody can check.
+
+    Written after every judgement, not at the end, for the reason the loop does the
+    same: work that is lost is work done twice.
+    """
+    if not reason.strip():
+        raise ValueError("ground truth needs a reason; these are the contested findings")
+
+    entries = [
+        json.loads(line)
+        for line in path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    _write(path, apply_label(entries, entry_id, label, reason=reason, by="human"))
+
+
 def run(path: Path) -> int:
     """Label until the set is done or the labeller stops."""
     entries: list[dict[str, Any]] = [

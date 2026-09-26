@@ -563,3 +563,128 @@ def test_an_entry_with_no_probability_gains_no_observation() -> None:
     ]
 
     assert not (record_verdicts(entries)[0].get("observations") or {})
+
+
+def _truthed(entry_id: str, window: float, function: float, label: str) -> dict[str, Any]:
+    return {
+        "entry_id": entry_id,
+        "rule_id": "SHELL-EXEC-UNSAFE",
+        "server_id": f"s/{entry_id}",
+        "label": label,
+        "probabilities": {"window": window, "function": function},
+    }
+
+
+def test_each_context_is_scored_against_ground_truth_where_they_disagree() -> None:
+    """The measure the decisiveness statistic could not provide.
+
+    Decisiveness answers whether a judge could decide, and is structurally blind
+    to whether the decision was right: a judge can move from confidently wrong to
+    confidently right without changing how confident it is. Direction needs ground
+    truth, and only on the findings where the contexts disagree, because those are
+    the only ones where the annotation choice changes an answer.
+    """
+    from evals.harness.experiment import truth_agreement
+
+    entries = [
+        _truthed("a", window=0.80, function=0.20, label="false_positive"),
+        _truthed("b", window=0.80, function=0.20, label="false_positive"),
+        _truthed("c", window=0.20, function=0.80, label="true_positive"),
+        # Agrees under both, so it says nothing about the annotation choice.
+        _truthed("d", window=0.90, function=0.90, label="true_positive"),
+    ]
+
+    result = truth_agreement(entries)
+
+    assert result.n == 3
+    assert result.function_correct == 3
+    assert result.window_correct == 0
+
+
+def test_the_direction_of_each_context_s_errors_is_reported() -> None:
+    """The result that survived, and the one that reverses the original
+    hypothesis.
+
+    The hypothesis was that a narrow window hides true positives, biasing
+    measured precision downward. The opposite happened: a narrow window hides the
+    *guard* - the allowlist assertion, the sanitiser, the hardcoded constant - so
+    it accepts findings that are not real. Counting the two error directions
+    separately is what makes that visible; an accuracy figure alone would report
+    the same number for either.
+    """
+    from evals.harness.experiment import truth_agreement
+
+    entries = [
+        _truthed("a", window=0.80, function=0.20, label="false_positive"),
+        _truthed("b", window=0.80, function=0.20, label="false_positive"),
+        _truthed("c", window=0.20, function=0.80, label="true_positive"),
+    ]
+
+    result = truth_agreement(entries)
+
+    assert result.window_credulous == 2, "called a false positive real"
+    assert result.window_missed == 1, "rejected a real finding"
+
+
+def test_an_unsure_label_is_excluded_from_the_scoring() -> None:
+    """A finding nobody could settle even with the wider context is evidence about
+    interprocedural reach, not about which annotation context is better."""
+    from evals.harness.experiment import truth_agreement
+
+    entries = [
+        _truthed("a", window=0.80, function=0.20, label="false_positive"),
+        _truthed("b", window=0.80, function=0.20, label="unsure"),
+    ]
+
+    assert truth_agreement(entries).n == 1
+
+
+def test_the_agreement_result_carries_its_own_significance_and_spread() -> None:
+    """An accuracy gap at this sample size can easily be noise, and saying so is
+    the difference between a result and a claim. The server count travels with it
+    because a figure drawn mostly from one repository is a fact about that
+    repository."""
+    from evals.harness.experiment import truth_agreement
+
+    entries = [
+        _truthed(str(n), window=0.80, function=0.20, label="false_positive")
+        for n in range(10)
+    ]
+
+    result = truth_agreement(entries)
+
+    assert result.p_value < 0.01
+    assert result.servers == 10
+    assert result.really_vulnerable == 0
+
+
+def test_the_error_asymmetry_carries_its_own_significance() -> None:
+    """The claim rests on the direction of the errors, so that is the number that
+    needs a test - not the accuracy gap, which at these sample sizes is usually
+    inconclusive. Reporting an asymmetry without asking whether it could be a coin
+    flip is how a striking ratio becomes an unsupported claim.
+    """
+    from evals.harness.experiment import truth_agreement
+
+    entries = [
+        _truthed(str(n), window=0.80, function=0.20, label="false_positive")
+        for n in range(16)
+    ] + [_truthed("real", window=0.20, function=0.80, label="true_positive")]
+
+    result = truth_agreement(entries)
+
+    assert (result.window_credulous, result.window_missed) == (16, 1)
+    assert result.window_credulity_p_value < 0.001
+
+
+def test_a_balanced_error_split_reports_no_asymmetry() -> None:
+    """Errors in both directions equally mean the context is simply noisy, which
+    is a different finding from a context that is systematically credulous."""
+    from evals.harness.experiment import truth_agreement
+
+    entries = [
+        _truthed("a", window=0.80, function=0.20, label="false_positive"),
+        _truthed("b", window=0.20, function=0.80, label="true_positive"),
+    ]
+
+    assert truth_agreement(entries).window_credulity_p_value == 1.0

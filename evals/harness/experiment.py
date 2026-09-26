@@ -554,3 +554,88 @@ def record_verdicts(entries: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]
             fresh["observations"] = observations
         updated.append(fresh)
     return updated
+
+
+@dataclass(frozen=True)
+class TruthAgreement:
+    """Which context was right, on the findings where the choice changed the answer.
+
+    The measure decisiveness could not provide. Decisiveness answers whether a
+    judge could decide and is structurally blind to whether the decision was
+    right: a judge can move from confidently wrong to confidently right without
+    its confidence changing at all, which is what happened here.
+
+    The two error directions are carried separately because that is where the
+    result lives. An accuracy figure reports the same number whether a context
+    errs by accepting findings that are not real or by rejecting ones that are,
+    and those have opposite consequences for a published precision.
+    """
+
+    n: int
+    window_correct: int
+    function_correct: int
+    window_credulous: int
+    window_missed: int
+    function_credulous: int
+    function_missed: int
+    really_vulnerable: int
+    servers: int
+    p_value: float
+    window_credulity_p_value: float
+    function_credulity_p_value: float
+
+
+def truth_agreement(entries: Sequence[Mapping[str, Any]]) -> TruthAgreement:
+    """Score both contexts against ground truth where their verdicts disagree.
+
+    Restricted to the disagreement set on purpose. Those are the only findings
+    where the annotation choice changes an answer, and they are where the hand
+    labelling was spent. The consequence is that nothing here is an estimate of
+    overall precision: the set is selected, so a precision computed over it would
+    be biased by the selection rather than measured.
+
+    Entries labelled unsure are excluded. A finding nobody could settle even with
+    the wider context is evidence about interprocedural reach, not about which
+    annotation context serves a judge better.
+
+    The p-value is over the accuracy difference, and at the sample sizes this
+    experiment can reach it will usually be unconvincing. It is reported anyway,
+    because an accuracy gap that could be noise and one that could not are
+    different things, and only one of them is a result.
+    """
+    rows = [
+        (entry, verdict(float(window)), verdict(float(function)), str(entry["label"]))
+        for entry, window, function in _paired_probabilities(entries)
+        if entry.get("label") in ("true_positive", "false_positive")
+    ]
+    disagreed = [row for row in rows if row[1] != row[2]]
+
+    def wrong(seen: str, truth: str, direction: str) -> bool:
+        if direction == "credulous":
+            return seen == "true_positive" and truth == "false_positive"
+        return seen == "false_positive" and truth == "true_positive"
+
+    window_correct = sum(1 for _, w, _, truth in disagreed if w == truth)
+    function_correct = sum(1 for _, _, f, truth in disagreed if f == truth)
+    return TruthAgreement(
+        n=len(disagreed),
+        window_correct=window_correct,
+        function_correct=function_correct,
+        window_credulous=sum(1 for _, w, _, t in disagreed if wrong(w, t, "credulous")),
+        window_missed=sum(1 for _, w, _, t in disagreed if wrong(w, t, "missed")),
+        function_credulous=sum(1 for _, _, f, t in disagreed if wrong(f, t, "credulous")),
+        function_missed=sum(1 for _, _, f, t in disagreed if wrong(f, t, "missed")),
+        really_vulnerable=sum(1 for _, _, _, t in disagreed if t == "true_positive"),
+        servers=len({str(entry.get("server_id", "")) for entry, _, _, _ in disagreed}),
+        p_value=_sign_test(function_correct, window_correct),
+        # The asymmetry is what the claim rests on, so it is the number that gets
+        # tested. The accuracy gap above is usually inconclusive at these sizes.
+        window_credulity_p_value=_sign_test(
+            sum(1 for _, w, _, t in disagreed if wrong(w, t, "credulous")),
+            sum(1 for _, w, _, t in disagreed if wrong(w, t, "missed")),
+        ),
+        function_credulity_p_value=_sign_test(
+            sum(1 for _, _, f, t in disagreed if wrong(f, t, "credulous")),
+            sum(1 for _, _, f, t in disagreed if wrong(f, t, "missed")),
+        ),
+    )
