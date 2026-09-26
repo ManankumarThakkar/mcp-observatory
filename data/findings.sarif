@@ -572,7 +572,7 @@
             "severity": "medium",
             "confidence": "low",
             "serverId": "com.expense-budget-tracker/expense-budget-tracker",
-            "commitSha": "77caf32bfbac2b04a348caa0d063123846fa99da"
+            "commitSha": "5f9666af5c1a27fcc7f76be97b40e0c21f7d5405"
           }
         },
         {
@@ -1832,7 +1832,7 @@
             "severity": "medium",
             "confidence": "low",
             "serverId": "io.github.vassiliylakhonin/vizier-guard",
-            "commitSha": "a401a2076e5aa04e9c656af1dac8e9462c6ee5eb"
+            "commitSha": "42f2467e1a3e51e3471abc9e2047c43059f8f2f7"
           }
         },
         {
@@ -1952,7 +1952,37 @@
             "severity": "medium",
             "confidence": "low",
             "serverId": "io.github.pscale-commons/bsp-mcp",
-            "commitSha": "67850ddd0479392989ab435768e343df355e1303"
+            "commitSha": "95300f787342cce58286b4d8b44a002a478be969"
+          }
+        },
+        {
+          "ruleId": "SCOPE-OVERBROAD",
+          "ruleIndex": 0,
+          "level": "warning",
+          "message": {
+            "text": "SCOPE-OVERBROAD: accepts any origin (\"*\")"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "src/site/site-worker.ts"
+                },
+                "region": {
+                  "startLine": 20,
+                  "endLine": 20
+                }
+              }
+            }
+          ],
+          "partialFingerprints": {
+            "primaryLocationLineHash": "3ce9d508f92be74de745593a089d7972d02988cff1abcba5494ad3d35ed3bee1"
+          },
+          "properties": {
+            "severity": "medium",
+            "confidence": "low",
+            "serverId": "io.github.DiffCI/diffci",
+            "commitSha": "ecee5e9f2f442fd3ee93c1504c0deae56b692a60"
           }
         },
         {
@@ -2042,7 +2072,7 @@
             "severity": "medium",
             "confidence": "low",
             "serverId": "io.github.wvdsh/wavedash",
-            "commitSha": "7f255afed4f553cc84fc88f7a79f51e9412d6ca2"
+            "commitSha": "6eb96b161efd96916c7fbcda9bbfd467fe1d29e6"
           }
         },
         {
@@ -2792,7 +2822,7 @@
             "severity": "medium",
             "confidence": "low",
             "serverId": "com.nooticr/mcp",
-            "commitSha": "4373b4119e6de5bde7d0c585c6e5ea54f346412a"
+            "commitSha": "7d8218643286ce5434ac89094fd914cc1786baff"
           }
         },
         {
@@ -2882,7 +2912,7 @@
             "severity": "medium",
             "confidence": "low",
             "serverId": "com.nooticr/mcp",
-            "commitSha": "4373b4119e6de5bde7d0c585c6e5ea54f346412a"
+            "commitSha": "7d8218643286ce5434ac89094fd914cc1786baff"
           }
         },
         {
@@ -3452,7 +3482,7 @@
             "severity": "medium",
             "confidence": "low",
             "serverId": "io.github.nyuchi/mukoko-news",
-            "commitSha": "eaa6f1f2022d40ae70460d436af91d54056386e3"
+            "commitSha": "94b7678f751d91afc7e371ba55219b26f1bd620b"
           }
         },
         {
@@ -3872,7 +3902,7 @@
             "severity": "medium",
             "confidence": "low",
             "serverId": "io.github.vassiliylakhonin/vizier-guard",
-            "commitSha": "a401a2076e5aa04e9c656af1dac8e9462c6ee5eb"
+            "commitSha": "42f2467e1a3e51e3471abc9e2047c43059f8f2f7"
           }
         },
         {
@@ -4232,7 +4262,7 @@
             "severity": "medium",
             "confidence": "low",
             "serverId": "io.github.alisaitteke/photoshop-mcp",
-            "commitSha": "ce1f56b2432973b54781bd9cabba24648ffff014"
+            "commitSha": "2d1a3b159e98a400db87434c8df3199420d56836"
           }
         },
         {
@@ -4352,7 +4382,7 @@
             "severity": "medium",
             "confidence": "low",
             "serverId": "io.github.nyuchi/mukoko-news",
-            "commitSha": "eaa6f1f2022d40ae70460d436af91d54056386e3"
+            "commitSha": "94b7678f751d91afc7e371ba55219b26f1bd620b"
           }
         },
         {
@@ -4622,7 +4652,7 @@
             "severity": "medium",
             "confidence": "low",
             "serverId": "io.github.vassiliylakhonin/vizier-guard",
-            "commitSha": "a401a2076e5aa04e9c656af1dac8e9462c6ee5eb"
+            "commitSha": "42f2467e1a3e51e3471abc9e2047c43059f8f2f7"
           }
         },
         {
@@ -5042,7 +5072,7 @@
             "severity": "medium",
             "confidence": "low",
             "serverId": "com.nooticr/mcp",
-            "commitSha": "4373b4119e6de5bde7d0c585c6e5ea54f346412a"
+            "commitSha": "7d8218643286ce5434ac89094fd914cc1786baff"
           }
         },
         {
@@ -5072,7 +5102,7 @@
             "severity": "medium",
             "confidence": "low",
             "serverId": "org.thorchain.swap/thorchain-swap",
-            "commitSha": "e12e94ca84c210a680ba9fd38a1387ae944fc5c5"
+            "commitSha": "f25eebfe2af8f7726d341fc3754d2c98069b3c8f"
           }
         },
         {
@@ -5342,7 +5372,7 @@
             "severity": "medium",
             "confidence": "low",
             "serverId": "com.nooticr/mcp",
-            "commitSha": "4373b4119e6de5bde7d0c585c6e5ea54f346412a"
+            "commitSha": "7d8218643286ce5434ac89094fd914cc1786baff"
           }
         },
         {
@@ -6212,7 +6242,7 @@
             "severity": "medium",
             "confidence": "low",
             "serverId": "com.expense-budget-tracker/expense-budget-tracker",
-            "commitSha": "77caf32bfbac2b04a348caa0d063123846fa99da"
+            "commitSha": "5f9666af5c1a27fcc7f76be97b40e0c21f7d5405"
           }
         },
         {
@@ -6362,7 +6392,7 @@
             "severity": "medium",
             "confidence": "low",
             "serverId": "com.nooticr/mcp",
-            "commitSha": "4373b4119e6de5bde7d0c585c6e5ea54f346412a"
+            "commitSha": "7d8218643286ce5434ac89094fd914cc1786baff"
           }
         },
         {
@@ -6932,7 +6962,7 @@
             "severity": "medium",
             "confidence": "low",
             "serverId": "io.github.vassiliylakhonin/vizier-guard",
-            "commitSha": "a401a2076e5aa04e9c656af1dac8e9462c6ee5eb"
+            "commitSha": "42f2467e1a3e51e3471abc9e2047c43059f8f2f7"
           }
         },
         {
@@ -7112,7 +7142,7 @@
             "severity": "medium",
             "confidence": "low",
             "serverId": "io.github.wyattpalm2-eng/x402-seller",
-            "commitSha": "dca0739fdba680e268cca74e60e81d90e7ad8249"
+            "commitSha": "349d6da930da49de2201adfa4547eee1cff745b0"
           }
         },
         {
@@ -7322,7 +7352,7 @@
             "severity": "medium",
             "confidence": "low",
             "serverId": "io.github.vassiliylakhonin/vizier-guard",
-            "commitSha": "a401a2076e5aa04e9c656af1dac8e9462c6ee5eb"
+            "commitSha": "42f2467e1a3e51e3471abc9e2047c43059f8f2f7"
           }
         },
         {
@@ -7382,7 +7412,7 @@
             "severity": "medium",
             "confidence": "low",
             "serverId": "io.github.nyuchi/mukoko-news",
-            "commitSha": "eaa6f1f2022d40ae70460d436af91d54056386e3"
+            "commitSha": "94b7678f751d91afc7e371ba55219b26f1bd620b"
           }
         },
         {
@@ -7982,7 +8012,7 @@
             "severity": "medium",
             "confidence": "low",
             "serverId": "com.expense-budget-tracker/expense-budget-tracker",
-            "commitSha": "77caf32bfbac2b04a348caa0d063123846fa99da"
+            "commitSha": "5f9666af5c1a27fcc7f76be97b40e0c21f7d5405"
           }
         },
         {
@@ -8462,7 +8492,7 @@
             "severity": "medium",
             "confidence": "low",
             "serverId": "io.github.vassiliylakhonin/vizier-guard",
-            "commitSha": "a401a2076e5aa04e9c656af1dac8e9462c6ee5eb"
+            "commitSha": "42f2467e1a3e51e3471abc9e2047c43059f8f2f7"
           }
         },
         {
@@ -8552,7 +8582,7 @@
             "severity": "medium",
             "confidence": "low",
             "serverId": "com.expense-budget-tracker/expense-budget-tracker",
-            "commitSha": "77caf32bfbac2b04a348caa0d063123846fa99da"
+            "commitSha": "5f9666af5c1a27fcc7f76be97b40e0c21f7d5405"
           }
         },
         {
@@ -8732,7 +8762,7 @@
             "severity": "medium",
             "confidence": "low",
             "serverId": "com.nooticr/mcp",
-            "commitSha": "4373b4119e6de5bde7d0c585c6e5ea54f346412a"
+            "commitSha": "7d8218643286ce5434ac89094fd914cc1786baff"
           }
         },
         {
