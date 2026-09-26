@@ -396,3 +396,109 @@ def label_priority(
         key=lambda entry: (str(entry["entry_id"]),),
     )
     return moved, control
+
+
+# Reported across a range rather than at one point. A single threshold invites
+# the suspicion that it was chosen to suit the answer, and showing the
+# sensitivity is cheaper than defending a choice.
+FLIP_THRESHOLDS = (0.4, 0.5, 0.6, 0.7)
+
+
+@dataclass(frozen=True)
+class FlipResult:
+    """Findings a benchmark would classify differently under the two contexts.
+
+    Concentration travels with the count on purpose. A share drawn mostly from
+    one repository is a fact about that repository, and this project has already
+    had to publish that caveat once, about a pilot where 22 of 43 findings came
+    from a single server.
+    """
+
+    threshold: float
+    count: int
+    n: int
+    by_rule: dict[str, int]
+    servers: int
+    largest_server: int
+
+    @property
+    def share(self) -> float | None:
+        return self.count / self.n if self.n else None
+
+
+def _paired_probabilities(
+    entries: Sequence[Mapping[str, Any]],
+) -> list[tuple[Mapping[str, Any], float, float]]:
+    """Entries carrying an answer under both conditions, with those answers."""
+    rows = []
+    for entry in entries:
+        probabilities = entry.get("probabilities") or {}
+        if not isinstance(probabilities, Mapping):
+            continue
+        window, function = probabilities.get("window"), probabilities.get("function")
+        if isinstance(window, int | float) and isinstance(function, int | float):
+            rows.append((entry, float(window), float(function)))
+    return rows
+
+
+def verdict_flips(
+    entries: Sequence[Mapping[str, Any]], *, threshold: float
+) -> FlipResult:
+    """Findings whose side of the threshold depends on which context was shown.
+
+    This is the consequence a moved probability does not yet have. A benchmark
+    publishes a classification, so a probability that shifts within one side
+    changes nothing anybody reads, while one that crosses over changes the
+    published verdict for that finding - from an annotation choice no benchmark
+    documents.
+
+    Counted in both directions. A flip that turns a finding from real to not real
+    is exactly as much instability as the reverse, and counting only the flattering
+    direction is how a variance result gets reported as a bias result.
+    """
+    flipped = [
+        (entry, window, function)
+        for entry, window, function in _paired_probabilities(entries)
+        if (window >= threshold) != (function >= threshold)
+    ]
+    by_rule: dict[str, int] = {}
+    for entry, _, _ in flipped:
+        rule_id = str(entry["rule_id"])
+        by_rule[rule_id] = by_rule.get(rule_id, 0) + 1
+    servers = [str(entry.get("server_id", "")) for entry, _, _ in flipped]
+    counts = {server: servers.count(server) for server in set(servers)}
+    return FlipResult(
+        threshold=threshold,
+        count=len(flipped),
+        n=len(_paired_probabilities(entries)),
+        by_rule=by_rule,
+        servers=len(counts),
+        largest_server=max(counts.values()) if counts else 0,
+    )
+
+
+def flip_sensitivity(
+    entries: Sequence[Mapping[str, Any]],
+    *,
+    thresholds: Sequence[float] = FLIP_THRESHOLDS,
+) -> dict[float, FlipResult]:
+    """The flip share at each threshold, so a reader can see it is not an artefact."""
+    return {threshold: verdict_flips(entries, threshold=threshold) for threshold in thresholds}
+
+
+def per_rule_effects(entries: Sequence[Mapping[str, Any]]) -> dict[str, PairedEffect]:
+    """The decisiveness effect for each rule separately.
+
+    The combined figure hid a disagreement worth more than the average: of the two
+    rules the mechanism was predicted to help, one moved and the other did not. A
+    mechanism claimed for a class of rules has to be shown for the class, and an
+    average over them is exactly where a single rule carrying the result becomes
+    invisible.
+    """
+    rules = sorted({str(entry["rule_id"]) for entry in entries})
+    return {
+        rule_id: paired_decisiveness(
+            [entry for entry in entries if str(entry["rule_id"]) == rule_id]
+        )
+        for rule_id in rules
+    }

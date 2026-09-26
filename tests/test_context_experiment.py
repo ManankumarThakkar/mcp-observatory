@@ -396,3 +396,88 @@ def test_an_unpaired_entry_is_offered_for_neither() -> None:
 
     assert [e["entry_id"] for e in moved] == ["paired"]
     assert [e["entry_id"] for e in control] == ["paired"]
+
+
+def _probed_rule(entry_id: str, rule_id: str, window: float, function: float,
+                 server_id: str = "a/one") -> dict[str, object]:
+    return {
+        "entry_id": entry_id,
+        "rule_id": rule_id,
+        "server_id": server_id,
+        "probabilities": {"window": window, "function": function},
+    }
+
+
+def test_a_verdict_flip_is_counted_when_the_context_changes_the_side() -> None:
+    """The finding that survived when the pre-registered one did not.
+
+    A probability that moves is not yet a consequence; a probability that crosses
+    the decision threshold is. This counts the findings a benchmark would
+    classify differently purely because of which context its annotator was shown.
+    """
+    from evals.harness.experiment import verdict_flips
+
+    entries = [
+        _probed_rule("flip-up", "SHELL-EXEC-UNSAFE", 0.45, 0.80),
+        _probed_rule("flip-down", "SHELL-EXEC-UNSAFE", 0.80, 0.45),
+        _probed_rule("moved-but-same-side", "PATH-TRAVERSAL", 0.55, 0.95),
+    ]
+
+    flips = verdict_flips(entries, threshold=0.5)
+
+    assert flips.count == 2
+    assert flips.n == 3
+    assert flips.share == pytest.approx(2 / 3)
+    assert flips.by_rule == {"SHELL-EXEC-UNSAFE": 2}
+
+
+def test_a_flip_share_is_reported_with_its_concentration() -> None:
+    """The caveat that has to travel with the number. A share drawn mostly from
+    one repository is a fact about that repository, and this project has already
+    had to publish that caveat once about a pilot where 22 of 43 findings came
+    from a single server."""
+    from evals.harness.experiment import verdict_flips
+
+    entries = [
+        _probed_rule("a", "SHELL-EXEC-UNSAFE", 0.45, 0.80, server_id="x/one"),
+        _probed_rule("b", "SHELL-EXEC-UNSAFE", 0.45, 0.80, server_id="x/one"),
+        _probed_rule("c", "SHELL-EXEC-UNSAFE", 0.45, 0.80, server_id="y/two"),
+    ]
+
+    flips = verdict_flips(entries, threshold=0.5)
+
+    assert flips.servers == 2
+    assert flips.largest_server == 2
+
+
+def test_the_flip_share_is_reported_across_thresholds_not_at_one() -> None:
+    """A single threshold invites the suspicion that it was chosen. Reporting the
+    sensitivity is cheaper than defending a choice, and a share that holds across
+    the range is the evidence that it is not an artefact of one."""
+    from evals.harness.experiment import flip_sensitivity
+
+    entries = [_probed_rule("a", "SHELL-EXEC-UNSAFE", 0.45, 0.80)]
+
+    across = flip_sensitivity(entries, thresholds=(0.4, 0.5, 0.6))
+
+    assert sorted(across) == [0.4, 0.5, 0.6]
+    assert across[0.5].count == 1
+    assert across[0.4].count == 0, "0.45 and 0.80 are both above 0.40"
+
+
+def test_each_rule_gets_its_own_effect_so_one_cannot_carry_the_others() -> None:
+    """The combined figure hid a disagreement: one taint rule moved and the other
+    did not. A mechanism claimed for both rules has to be shown for both, and a
+    per-rule breakdown is what makes that checkable rather than averaged away."""
+    from evals.harness.experiment import per_rule_effects
+
+    entries = [
+        _probed_rule("a", "SHELL-EXEC-UNSAFE", 0.51, 0.95),
+        _probed_rule("b", "SHELL-EXEC-UNSAFE", 0.51, 0.95),
+        _probed_rule("c", "PATH-TRAVERSAL", 0.95, 0.51),
+    ]
+
+    effects = per_rule_effects(entries)
+
+    assert effects["SHELL-EXEC-UNSAFE"].more_decisive == 2
+    assert effects["PATH-TRAVERSAL"].less_decisive == 1

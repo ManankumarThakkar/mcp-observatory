@@ -14,7 +14,9 @@ from evals.golden.label import CONDITIONS
 from evals.harness.experiment import (
     PairedEffect,
     eligible,
+    flip_sensitivity,
     paired_decisiveness,
+    per_rule_effects,
     record_probabilities,
     split_by_prediction,
 )
@@ -147,6 +149,43 @@ def main(argv: Sequence[str] | None = None) -> int:
     print(
         "\nThe control group is the placebo: if it moves as much as the "
         "predicted group, the effect is more text rather than the right text.",
+    )
+
+    entries = [
+        json.loads(line)
+        for line in args.path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+
+    # Reported per rule because the combined figure can hide a disagreement
+    # between two rules the same mechanism was claimed for, and an average is
+    # where a single rule carrying the whole result becomes invisible.
+    print("\nPer rule, so one rule cannot carry the others:")
+    for rule_id, effect in per_rule_effects(entries).items():
+        if effect.n == 0:
+            continue
+        print(
+            f"  {rule_id:24} n={effect.n:3}  more decisive {effect.more_decisive:3}"
+            f"  less {effect.less_decisive:3}  p = {effect.p_value:.4f}"
+        )
+    print(
+        f"  Examining {len(per_rule_effects(entries))} rules, so a single rule's "
+        "p-value needs a multiple-comparison correction before it means anything."
+    )
+
+    # A moved probability is not yet a consequence; one that crosses the
+    # threshold changes the verdict a benchmark publishes for that finding.
+    print("\nFindings whose verdict depends on which context was shown:")
+    for threshold, flips in flip_sensitivity(entries).items():
+        share = "n/a" if flips.share is None else f"{flips.share:.1%}"
+        print(
+            f"  threshold {threshold:.2f}  {flips.count:3}/{flips.n} = {share:>6}"
+            f"  across {flips.servers} servers, largest contributes {flips.largest_server}"
+        )
+    print(
+        "  A share that holds across the range is not an artefact of one "
+        "threshold. Concentration is printed because a share drawn mostly from "
+        "one repository is a fact about that repository."
     )
     return 0
 
