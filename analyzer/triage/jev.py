@@ -63,36 +63,111 @@ def build_question(rule_id: str) -> dict[str, Any]:
     }
 
 
-def post_json(url: str, body: Mapping[str, Any]) -> Mapping[str, Any]:
-    """Send one decision request, with the key read at call time.
+# Statuses that mean "ask again" rather than "your request is wrong". 429 is a
+# rate limit and the rest are upstream faults; every one of them resolves without
+# the caller changing anything.
+TRANSIENT_STATUSES = frozenset({429, 500, 502, 503, 504})
+
+# Bounded, because an unbounded retry against a real outage is a run that never
+# ends and, for a billable call, a bill that never stops. Four attempts covers a
+# gateway blip without pretending it can outlast a genuine failure.
+MAX_ATTEMPTS = 4
+
+# The first wait, doubling each time. A fixed short delay against a rate limit
+# re-triggers the rate limit, which is how a retry makes an outage worse.
+FIRST_BACKOFF_SECONDS = 1.0
+
+
+def is_transient(exc: BaseException) -> bool:
+    """Whether a failure is worth asking again about.
+
+    A missing status is transient: a dropped connection or a timeout carries no
+    code at all, and over a run of several hundred calls it is the commonest
+    interruption there is.
+
+    Everything else is permanent by default. An unauthorised or malformed
+    request will not fix itself, and retrying it wastes time, spends money where
+    the call is billable, and delays the report of a fault someone has to act on.
+    """
+    if isinstance(exc, urllib.error.HTTPError):
+        return exc.code in TRANSIENT_STATUSES
+    return isinstance(exc, urllib.error.URLError | TimeoutError)
+
+
+def _urlopen(request: urllib.request.Request) -> Mapping[str, Any]:
+    with urllib.request.urlopen(request, timeout=REQUEST_TIMEOUT_SECONDS) as response:
+        decoded: Mapping[str, Any] = json.load(response)
+        return decoded
+
+
+def post_json(
+    url: str,
+    body: Mapping[str, Any],
+    *,
+    send: Callable[[urllib.request.Request], Mapping[str, Any]] = _urlopen,
+    sleep: Callable[[float], None] = time.sleep,
+    token: str | None = None,
+) -> Mapping[str, Any]:
+    """Send one decision request, retrying the failures that are worth retrying.
 
     Separate from the adjudicator so that every test of the judging logic runs
-    without a network, a key, or a prepaid balance.
+    without a network, a key, or a prepaid balance. `send` and `sleep` are
+    injected for the same reason one layer down: the retry behaviour itself needs
+    testing, and a test that waited real seconds against a real service would be
+    neither fast nor repeatable.
+
+    Retries exist because of a measured failure, not a hypothetical one. A single
+    502 on the first paid call aborted a 210-call experiment. Nothing was lost -
+    answers are cached as they are made - but a run that cannot survive one bad
+    gateway cannot be finished, and re-running by hand until it happens to get
+    through is not a method.
     """
     request = urllib.request.Request(
         url,
         data=json.dumps(body).encode(),
         headers={
-            "Authorization": f"Bearer {bearer_token()}",
+            "Authorization": f"Bearer {token if token is not None else bearer_token()}",
             "Content-Type": "application/json",
         },
         method="POST",
     )
-    try:
-        with urllib.request.urlopen(request, timeout=REQUEST_TIMEOUT_SECONDS) as response:
-            decoded: Mapping[str, Any] = json.load(response)
-            return decoded
-    except urllib.error.HTTPError as exc:
-        if exc.code == 402:
-            raise RuntimeError(
-                "the decision model's prepaid balance is empty; top it up before rerunning"
-            ) from exc
-        # Every other status carries the service's own explanation, and
-        # discarding it turns a five-second diagnosis into a long one. A bare
-        # "HTTP Error 400" cost exactly that once: the cause was an oversized
-        # state, and the body said so.
-        detail = exc.read().decode(errors="replace")[:300]
-        raise RuntimeError(f"the decision model returned HTTP {exc.code}: {detail}") from exc
+
+    wait = FIRST_BACKOFF_SECONDS
+    for attempt in range(1, MAX_ATTEMPTS + 1):
+        try:
+            return send(request)
+        except urllib.error.HTTPError as exc:
+            if exc.code == 402:
+                raise RuntimeError(
+                    "the decision model's prepaid balance is empty; top it up before rerunning"
+                ) from exc
+            # Every other status carries the service's own explanation, and
+            # discarding it turns a five-second diagnosis into a long one. A bare
+            # "HTTP Error 400" cost exactly that once: the cause was an oversized
+            # state, and the body said so.
+            detail = exc.read().decode(errors="replace")[:300]
+            if not is_transient(exc):
+                raise RuntimeError(
+                    f"the decision model returned HTTP {exc.code}: {detail}"
+                ) from exc
+            if attempt == MAX_ATTEMPTS:
+                raise RuntimeError(
+                    f"the decision model returned HTTP {exc.code} after "
+                    f"{attempt} attempts: {detail}"
+                ) from exc
+        except (urllib.error.URLError, TimeoutError) as exc:
+            if attempt == MAX_ATTEMPTS:
+                raise RuntimeError(
+                    f"the decision model was unreachable after {attempt} attempts: {exc}"
+                ) from exc
+
+        sleep(wait)
+        wait *= 2
+
+    # Unreachable: the loop either returns or raises on its last attempt. Raising
+    # rather than returning None, so a future edit that breaks that cannot hand a
+    # caller a missing answer dressed as a real one.
+    raise RuntimeError("retry loop ended without a decision")
 
 
 class JevAdjudicator:
