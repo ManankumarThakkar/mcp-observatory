@@ -22,6 +22,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from analyzer.rules import ALL_RULES
+from analyzer.sampling import draw
 from analyzer.triage.base import CONTEXT_FIELDS
 from evals.golden.label import CONDITIONS
 
@@ -350,3 +351,48 @@ def record_probabilities(
         fresh["probabilities"] = probabilities
         updated.append(fresh)
     return updated
+
+
+def label_priority(
+    entries: Sequence[Mapping[str, Any]], *, size: int, seed: int
+) -> tuple[list[Mapping[str, Any]], list[Mapping[str, Any]]]:
+    """The entries worth labelling by hand, and a control sample for the base rate.
+
+    Two groups, because the interesting number is a comparison. The share of
+    context-resolved findings that turn out to be real means nothing on its own;
+    it has to be read against the share among findings the narrow window already
+    settled. If the first is higher, a benchmark built on the narrow window was
+    concealing true positives and its precision understated the rule.
+
+    The first group is ranked by how much the wider context moved the
+    adjudicator, not cut at a threshold. A threshold would have to be chosen and
+    then defended, and a reader could move it and move the finding. Ranking only
+    decides where labelling effort goes; it does not enter the reported figure,
+    and that distinction is worth stating whenever the number is quoted.
+
+    The control is drawn through the project's one sampling method, so it is
+    reproducible by someone not running this code and an entry's position depends
+    only on its own identity. That second property is what lets the population
+    grow later without discarding labels somebody spent hours making.
+
+    Unpaired entries appear in neither. A movement cannot be computed from one
+    observation, and a base rate drawn from a different population is not a base
+    rate for this one.
+    """
+    paired = []
+    for entry in entries:
+        probabilities = entry.get("probabilities") or {}
+        if not isinstance(probabilities, Mapping):
+            continue
+        window, function = probabilities.get("window"), probabilities.get("function")
+        if isinstance(window, int | float) and isinstance(function, int | float):
+            paired.append((entry, decisiveness(float(function)) - decisiveness(float(window))))
+
+    moved = [entry for entry, _ in sorted(paired, key=lambda pair: -pair[1])][:size]
+    control = draw(
+        [entry for entry, _ in paired],
+        size,
+        seed=seed,
+        key=lambda entry: (str(entry["entry_id"]),),
+    )
+    return moved, control

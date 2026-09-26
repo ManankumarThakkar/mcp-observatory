@@ -318,3 +318,81 @@ def test_only_entries_carrying_a_condition_s_context_are_eligible_for_it() -> No
 
     assert [e["entry_id"] for e in eligible(entries, "window")] == ["a", "b"]
     assert [e["entry_id"] for e in eligible(entries, "function")] == ["a"]
+
+
+def test_the_entries_that_moved_most_are_offered_for_labelling_first() -> None:
+    """Claim two needs ground truth, but only where it changes the answer.
+
+    Whether a wider context lets a judge answer is already measured without
+    labels. What labels are for is the direction: if the findings a narrow window
+    leaves undecided are disproportionately real, then a benchmark built on that
+    window understates precision. The entries that moved are where that is
+    decided, so they are where hand labelling is worth spending.
+    """
+    from evals.harness.experiment import label_priority
+
+    entries = [
+        _probed("small", window=0.60, function=0.65),
+        _probed("large", window=0.51, function=0.98),
+        _probed("middle", window=0.55, function=0.80),
+    ]
+
+    moved, _ = label_priority(entries, size=2, seed=1)
+
+    assert [e["entry_id"] for e in moved] == ["large", "middle"]
+
+
+def test_a_control_sample_is_drawn_for_the_base_rate() -> None:
+    """The share of the moved entries that are real means nothing on its own. It
+    has to be compared against the share among findings the window already
+    settled, and that comparison needs its own sample, drawn without regard to
+    how much anything moved."""
+    from evals.harness.experiment import label_priority
+
+    entries = [_probed(f"e{n}", window=0.5 + n / 100, function=0.9) for n in range(20)]
+
+    _, control = label_priority(entries, size=5, seed=1)
+
+    assert len(control) == 5
+
+
+def test_the_control_sample_is_reproducible_and_survives_a_redraw() -> None:
+    """Drawn through the project's one sampling method, so a labelled entry stays
+    in the sample when the population grows. Anything else would throw away
+    labels somebody spent hours making."""
+    from evals.harness.experiment import label_priority
+
+    smaller = [_probed(f"e{n}", window=0.52, function=0.9) for n in range(20)]
+    larger = smaller + [_probed(f"e{n}", window=0.52, function=0.9) for n in range(20, 40)]
+
+    _, first = label_priority(smaller, size=5, seed=7)
+    _, again = label_priority(smaller, size=5, seed=7)
+
+    assert [e["entry_id"] for e in first] == [e["entry_id"] for e in again]
+
+    # The guarantee that matters: an entry's position depends only on its own
+    # identity and the seed, so the smaller population's order survives intact
+    # inside the larger one's. Without it, adding entries would reshuffle the
+    # control sample and discard labels somebody spent hours making.
+    _, small_order = label_priority(smaller, size=len(smaller), seed=7)
+    _, large_order = label_priority(larger, size=len(larger), seed=7)
+    small_ids = [e["entry_id"] for e in small_order]
+    kept = [e["entry_id"] for e in large_order if e["entry_id"] in set(small_ids)]
+
+    assert kept == small_ids
+
+
+def test_an_unpaired_entry_is_offered_for_neither() -> None:
+    """A decisiveness increase cannot be computed from one observation, and a
+    base rate drawn from unpaired entries would not be the same population."""
+    from evals.harness.experiment import label_priority
+
+    entries = [
+        _probed("paired", window=0.52, function=0.98),
+        _probed("half", window=0.52, function=None),
+    ]
+
+    moved, control = label_priority(entries, size=5, seed=1)
+
+    assert [e["entry_id"] for e in moved] == ["paired"]
+    assert [e["entry_id"] for e in control] == ["paired"]
