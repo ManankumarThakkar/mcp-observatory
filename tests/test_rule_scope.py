@@ -247,3 +247,82 @@ def test_a_wildcard_inside_a_list_of_origins_is_still_found() -> None:
     findings = _analyze('app.use(cors({ origin: ["https://a.test", "*"] }));')
 
     assert len(findings) == 1
+
+
+# --- the local-tool precondition ----------------------------------------------
+
+def test_a_wildcard_origin_in_a_deployed_handler_is_not_reported() -> None:
+    """The rule's own claim, finally enforced.
+
+    The description says the reach is wider than a LOCAL tool needs, and the
+    implementation never checked that the server was local. Measured on the
+    golden set: 36 of 60 findings came from deployed HTTP servers, and 9 of the
+    10 hand-labelled ones were false positives, every contested one for this
+    single reason.
+
+    A wildcard origin cannot be combined with allow-credentials, so a browser
+    never sends cookies to it. On a public read-only endpoint of a deployed
+    service it is the correct configuration rather than excess reach. The claim
+    holds for a local server, where a page in the user's browser could otherwise
+    drive a tool on their machine, and does not hold here.
+    """
+    source = (
+        "export default {\n"
+        "  async fetch(request: Request, env: Env): Promise<Response> {\n"
+        "    return new Response(JSON.stringify({ ok: true }), {\n"
+        '      headers: { "access-control-allow-origin": "*" },\n'
+        "    });\n"
+        "  },\n"
+        "};\n"
+    )
+
+    assert _analyze(source) == []
+
+
+def test_a_wildcard_origin_in_a_local_server_is_still_reported() -> None:
+    """The guard against over-correcting the change above.
+
+    If this fails, narrowing the rule has silently disabled it on the code it
+    exists to protect - which is the failure mode of every exclusion. A stdio
+    MCP server that also opens a browser-reachable port is exactly the case the
+    claim was written for.
+    """
+    source = (
+        "const transport = new StdioServerTransport();\n"
+        "await server.connect(transport);\n"
+        "const app = express();\n"
+        'app.use(cors({ origin: "*" }));\n'
+        "app.listen(7411, '127.0.0.1');\n"
+    )
+
+    findings = _analyze(source)
+
+    assert [f.evidence for f in findings] == ['accepts any origin ("*")']
+
+
+def test_a_deployed_handler_still_has_its_other_scopes_reported() -> None:
+    """Only the origin claim depends on the server being local. A deployed
+    service that treats the filesystem root as its scope is overbroad whoever
+    runs it, and suppressing that too would trade one silent gap for another.
+    """
+    source = (
+        "export default {\n"
+        "  async fetch(request: Request, env: Env): Promise<Response> {\n"
+        '    const roots = { allowedDirectories: ["/"] };\n'
+        '    return new Response(JSON.stringify(roots), { headers: { "access-control-allow-origin": "*" } });\n'
+        "  },\n"
+        "};\n"
+    )
+
+    evidence = [f.evidence for f in _analyze(source)]
+
+    assert any("/" in e and "origin" not in e for e in evidence), evidence
+    assert not any("origin" in e for e in evidence), evidence
+
+
+def test_the_deployed_worker_fixture_is_clean() -> None:
+    """A realistic remote MCP server whose wildcard origin is the correct
+    configuration. It stands in for the 36 of 60 golden-set findings that came
+    from deployed servers, and it must produce nothing.
+    """
+    assert _analyze(_fixture("clean/scope_deployed_worker.ts")) == []

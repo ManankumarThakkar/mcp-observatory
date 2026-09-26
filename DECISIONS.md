@@ -498,3 +498,81 @@ regardless.
 ones, or whether the name list on the filesystem check is too narrow. If
 `process.argv` scopes turn out to dominate real misconfiguration, the honest
 response is to say this rule cannot see them rather than to widen it.
+
+## D14 - The origin check applies the rule's own precondition, or it does not run
+
+**Decision.** `SCOPE-OVERBROAD`'s wildcard-origin check no longer fires in a file
+that is evidently a deployed HTTP handler. The interface and filesystem checks
+are unchanged. This narrows D13's second class rather than removing it.
+
+**Why.** D13 said to revisit when the golden set showed whether the three classes
+were the right ones. It did, and the origin class was wrong as stated. The rule's
+published description claims the reach is wider than a **local** tool needs, and
+nothing ever checked that the server was local. Measured on the golden set:
+
+| | Count |
+| --- | ---: |
+| `SCOPE-OVERBROAD` entries with captured context | 60 |
+| That look like deployed HTTP servers | 36 |
+| That look local only | 5 |
+| Hand-labelled, false positive | 9 |
+| Hand-labelled, true positive | 1 |
+
+Every one of the five findings where two annotation contexts disagreed was a
+false positive, and all five for this single reason.
+
+**Why a wildcard origin is not overbroad on a deployed server.** It cannot be
+combined with `Access-Control-Allow-Credentials`, so a browser never sends
+cookies to it. On a public read-only endpoint it is the configuration the service
+requires, not excess reach. The claim is sound for a local server, where a page
+in the user's browser could otherwise drive a tool on their machine, and unsound
+for a service whose entire purpose is to be called from anywhere.
+
+**Why this mattered more than its size suggests.** Every one of the 324 findings
+published at the time was `SCOPE-OVERBROAD`, and 293 of them were the origin
+claim. A rule at roughly one in ten precision on its dominant claim was the only
+thing on the public site, which is the exact failure D7 exists to prevent.
+
+**Verified against real servers, not only fixtures.** Ten servers carrying
+published origin findings were cloned and rescanned with the check on and off:
+
+| Server shape | Before | After |
+| --- | ---: | ---: |
+| Heavily deployed (7 to 65 Fetch-API files) | 48 | 14 |
+| No deployed file at all | 10 | 10 |
+| Sample total | 78 | 26 |
+
+The second row is the one that matters. A narrowed check that stopped firing
+everywhere would look like a success in the aggregate; the servers with no
+deployed handler are reported exactly as before.
+
+**Detection is positive-evidence only.** A file counts as deployed when it
+contains `new Response(`, `ExecutionContext`, `Deno.serve` or `Bun.serve`. Express
+is deliberately absent: an MCP server often runs a local Express listener, so it
+says nothing either way. Anything ambiguous is treated as local and still
+reported, because the failure mode of an exclusion is silently switching a check
+off on the code it was protecting.
+
+**Cost, accepted.**
+
+- A deployed server that genuinely does over-share - a wildcard origin on an
+  endpoint returning data that is not public - is now missed. The rule could not
+  distinguish that case before either, so this trades a measured 9:1
+  false-positive rate for a false negative on a case it never detected correctly.
+  Recovering it needs to know whether the endpoint's data is public, which is a
+  semantic judgement this rule does not make.
+- Detection is per-file, because a rule sees one file at a time. A deployed
+  handler that keeps its `Response` construction in a different file from its CORS
+  headers is still reported. Repo-wide signals such as `wrangler.toml` are
+  invisible to a rule.
+- The published origin-finding count falls sharply. Measured by cloning and
+  rescanning ten of the affected servers: 78 origin findings before, 26 after, a
+  67% reduction. That sample was chosen weighted toward the heaviest contributors,
+  so the corpus-wide figure will differ; the next full scan measures it. The drop
+  is the correct outcome and not a loss, because the removed findings were mostly
+  wrong.
+
+**Revisit when.** A relabelled sample measures the rule's precision after this
+change rather than before it. If the interface check turns out to carry the same
+confusion - `0.0.0.0` is correct for a container and overbroad for a laptop - it
+needs the same treatment, and it is 26 of the 324 rather than 293.
