@@ -93,8 +93,8 @@ def test_the_spend_guard_stops_calling_and_completes_the_run(tmp_path: Path) -> 
         entries, adjudicator=_Counting(), cache=TriageCache(tmp_path / "t.jsonl"), max_calls=2
     )
 
-    assert sum(1 for d in results.values() if d is not None) == 2
-    assert sum(1 for d in results.values() if d is None) == 3
+    assert sum(1 for d in results.decisions.values() if d is not None) == 2
+    assert sum(1 for d in results.decisions.values() if d is None) == 3
 
 
 def test_cached_entries_do_not_consume_the_spend_guard(tmp_path: Path) -> None:
@@ -108,7 +108,7 @@ def test_cached_entries_do_not_consume_the_spend_guard(tmp_path: Path) -> None:
     results = adjudicate([_entry(n) for n in range(3)], adjudicator=fresh, cache=cache, max_calls=2)
 
     assert fresh.calls == 2
-    assert all(d is not None for d in results.values())
+    assert all(d is not None for d in results.decisions.values())
 
 
 def test_the_cap_is_the_documented_one() -> None:
@@ -137,10 +137,10 @@ def test_a_failed_adjudication_is_not_cached(tmp_path: Path) -> None:
             raise RuntimeError("service unavailable")
 
     cache = TriageCache(tmp_path / "t.jsonl")
-    with pytest.raises(RuntimeError):
-        adjudicate([_entry(1)], adjudicator=Failing(), cache=cache, max_calls=10)
+    result = adjudicate([_entry(1)], adjudicator=Failing(), cache=cache, max_calls=10)
 
     assert cache.get(cache_key("failing", _entry(1))) is None
+    assert result.failures  # isolated and reported, rather than raised
 
 
 class _Fixed:
@@ -166,8 +166,8 @@ def test_two_arms_do_not_read_each_other_s_answers(tmp_path: Path) -> None:
     first = adjudicate(entries, adjudicator=_Fixed("arm-a", 0.9), cache=cache, max_calls=10)
     second = adjudicate(entries, adjudicator=_Fixed("arm-b", 0.1), cache=cache, max_calls=10)
 
-    assert first["g-1"] is not None and first["g-1"].probability == 0.9
-    assert second["g-1"] is not None and second["g-1"].probability == 0.1
+    assert first.decisions["g-1"] is not None and first.decisions["g-1"].probability == 0.9
+    assert second.decisions["g-1"] is not None and second.decisions["g-1"].probability == 0.1
 
 
 def test_the_same_arm_still_reuses_its_own_answer(tmp_path: Path) -> None:
@@ -201,7 +201,7 @@ def test_a_real_golden_entry_can_be_adjudicated(tmp_path: Path) -> None:
         [entry], adjudicator=_Counting(), cache=TriageCache(tmp_path / "t.jsonl"), max_calls=10
     )
 
-    assert results["g-0001"] is not None
+    assert results.decisions["g-0001"] is not None
 
 
 def test_the_key_is_over_what_the_model_is_actually_sent(tmp_path: Path) -> None:
@@ -213,3 +213,104 @@ def test_the_key_is_over_what_the_model_is_actually_sent(tmp_path: Path) -> None
     assert cache_key("arm", base) == cache_key("arm", {**base, "evidence": "anything"})
     assert cache_key("arm", base) != cache_key("arm", {**base, "flagged_offset": 1})
     assert cache_key("arm", base) != cache_key("arm", {**base, "language": "python"})
+
+
+class _FailingOn:
+    """An arm that fails for chosen entries and answers the rest."""
+
+    name = "flaky"
+
+    def __init__(self, failing: set[str]) -> None:
+        self.failing = failing
+        self.asked: list[str] = []
+
+    def decide(self, entry: Any) -> Decision:
+        self.asked.append(str(entry["entry_id"]))
+        if str(entry["entry_id"]) in self.failing:
+            raise RuntimeError("the decision model was unreachable after 4 attempts")
+        return Decision(probability=0.9, cost_usd=0.0003, latency_ms=700.0)
+
+
+def test_one_unreachable_entry_does_not_discard_the_rest_of_the_run(tmp_path: Path) -> None:
+    """Measured against a degraded service: a single entry exhausting its
+    retries aborted a two-hundred-call run, and over that many calls against a
+    service answering in tens of seconds it was near-certain to happen. The
+    orchestrator already isolates one bad repository from a corpus run for the
+    same reason; an adjudication run has no claim to be different.
+    """
+    entries = [_entry(n) for n in range(4)]
+    for number, entry in enumerate(entries):
+        entry["entry_id"] = f"g-{number}"
+    arm = _FailingOn({"g-1"})
+
+    result = adjudicate(
+        entries, adjudicator=arm, cache=TriageCache(tmp_path / "t.jsonl"), max_calls=10
+    )
+
+    assert arm.asked == ["g-0", "g-1", "g-2", "g-3"], "the run stopped at the failure"
+    assert result.decisions["g-1"] is None
+    assert [result.decisions[f"g-{n}"] is not None for n in (0, 2, 3)] == [True] * 3
+
+
+def test_a_failure_is_reported_apart_from_an_entry_the_guard_never_reached(
+    tmp_path: Path,
+) -> None:
+    """Both end up without an answer, and the two call for different actions: one
+    is re-run, the other needs the cap raised. Reporting a failed call as a
+    budget decision would state a reason that is simply untrue."""
+    entries = [_entry(n) for n in range(3)]
+    for number, entry in enumerate(entries):
+        entry["entry_id"] = f"g-{number}"
+
+    result = adjudicate(
+        entries,
+        adjudicator=_FailingOn({"g-0"}),
+        cache=TriageCache(tmp_path / "t.jsonl"),
+        max_calls=1,
+    )
+
+    assert set(result.failures) == {"g-0"}
+    assert "unreachable" in result.failures["g-0"]
+    # g-0 failed without being billed, so g-1 took the single call and g-2 is
+    # the one the cap stopped short of.
+    assert result.decisions["g-1"] is not None
+    assert result.decisions["g-2"] is None
+    assert "g-2" not in result.failures
+
+
+def test_a_run_reports_what_it_spent(tmp_path: Path) -> None:
+    """The project publishes cost per decision, and a figure reconstructed later
+    from a price list is an estimate wearing a measurement's clothes."""
+    entries = [_entry(n) for n in range(3)]
+    for number, entry in enumerate(entries):
+        entry["entry_id"] = f"g-{number}"
+
+    result = adjudicate(
+        entries,
+        adjudicator=_FailingOn(set()),
+        cache=TriageCache(tmp_path / "t.jsonl"),
+        max_calls=10,
+    )
+
+    assert result.calls == 3
+    assert result.cost_usd == pytest.approx(3 * 0.0003)
+
+
+def test_a_failed_call_does_not_consume_the_spend_guard(tmp_path: Path) -> None:
+    """The cap bounds money, and a call that failed was not billed. Counting it
+    would let a degraded service silently shrink how much of a run gets
+    adjudicated, and the shrink would be worst exactly when the retries are
+    already struggling."""
+    entries = [_entry(n) for n in range(3)]
+    for number, entry in enumerate(entries):
+        entry["entry_id"] = f"g-{number}"
+
+    result = adjudicate(
+        entries,
+        adjudicator=_FailingOn({"g-0", "g-1"}),
+        cache=TriageCache(tmp_path / "t.jsonl"),
+        max_calls=1,
+    )
+
+    assert result.calls == 1
+    assert result.decisions["g-2"] is not None, "two failures used up the only call"

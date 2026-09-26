@@ -65,7 +65,7 @@ def run(
             f"{condition}: {len(pool)} of {len(entries)} entries carry this context",
             file=sys.stderr,
         )
-        decisions = adjudicate(
+        result = adjudicate(
             [as_condition(entry, condition) for entry in pool],
             adjudicator=adjudicator,
             cache=cache,
@@ -73,14 +73,29 @@ def run(
         )
         answered = {
             entry_id: (None if decision is None else decision.probability)
-            for entry_id, decision in decisions.items()
+            for entry_id, decision in result.decisions.items()
         }
-        skipped = sum(1 for value in answered.values() if value is None)
-        if skipped:
-            # Never silent. A truncated condition makes the comparison rest on
-            # whichever entries the guard happened to reach.
+        print(
+            f"  {result.calls} calls, ${result.cost_usd:.4f}",
+            file=sys.stderr,
+        )
+        # Never silent, and never with the wrong reason. A failed call and a call
+        # the budget stopped short of both arrive as a missing answer, and one is
+        # re-run while the other needs the cap raised.
+        if result.failures:
             print(
-                f"  {skipped} entries unanswered: the spend guard stopped at "
+                f"  {len(result.failures)} entries failed and can be re-run; "
+                f"first: {next(iter(result.failures.values()))[:120]}",
+                file=sys.stderr,
+            )
+        capped = sum(
+            1
+            for entry_id, value in answered.items()
+            if value is None and entry_id not in result.failures
+        )
+        if capped:
+            print(
+                f"  {capped} entries unanswered: the spend guard stopped at "
                 f"{max_calls} calls, so this condition is incomplete",
                 file=sys.stderr,
             )
