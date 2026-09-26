@@ -1,0 +1,1 @@
+{"by_rule": {"PATH-TRAVERSAL": 0, "SCOPE-OVERBROAD": 322, "SHELL-EXEC-UNSAFE": 0, "TOOL-DESC-INJECTION": 0, "UNICODE-CONCEAL": 0}, "corpus": 22035, "findings_found": 1125, "findings_published": 322, "scanned": 1647, "scanned_at": "2026-09-26T08:55:16Z", "servers_affected": 145, "withheld": 803}
