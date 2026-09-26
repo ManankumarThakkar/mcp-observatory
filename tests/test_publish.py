@@ -180,3 +180,53 @@ def test_the_scan_date_is_never_moved_to_the_publication_date(tmp_path: Path) ->
     summary = json.loads((data / SUMMARY_FILE).read_text())
     assert summary["generated_at"] == "2026-09-23T05:27:12Z"
     assert summary["scanned"] == 1642
+
+
+def test_a_dry_run_reads_the_current_coverage_and_writes_somewhere_else(tmp_path: Path) -> None:
+    """The safety check that had never worked.
+
+    `--dry-run` exists because publishing findings against named third-party
+    servers is not reversible: once the commit is pushed it is public whatever
+    happens next. It was implemented by pointing the destination at a throwaway
+    directory, so the same code path would produce the report - the right
+    instinct. But republication reads the previous scan's coverage from that same
+    directory, because coverage is measured by scanning and cannot be derived from
+    the history. So the dry run read an empty directory, found no scanned count,
+    and raised every time.
+
+    Reading and writing are therefore separate: the coverage comes from the
+    current publication, the output goes wherever the caller says.
+    """
+    cache, data, scratch = tmp_path / "cache", tmp_path / "data", tmp_path / "scratch"
+    _prior_scan(data)
+    _history(cache / "history.jsonl", [_finding(1), _finding(2)])
+
+    result = publish_from_history(
+        cache_dir=cache,
+        data_dir=data,
+        destination=scratch,
+        disclosure_records={},
+        now=NOW,
+        tool_version="0.1.0",
+    )
+
+    assert result.published + result.withheld == 2
+    assert (scratch / SUMMARY_FILE).exists(), "the report is produced by writing somewhere"
+    # The real publication is untouched, which is the whole point of a dry run.
+    current = json.loads((data / SUMMARY_FILE).read_text())
+    assert current["generated_at"] == "2026-09-23T05:27:12Z"
+    assert "published_at" not in current
+
+
+def test_publishing_writes_in_place_when_no_destination_is_given(tmp_path: Path) -> None:
+    """The ordinary case stays one directory, so the common call does not have to
+    name the same path twice."""
+    cache, data = tmp_path / "cache", tmp_path / "data"
+    _prior_scan(data)
+    _history(cache / "history.jsonl", [_finding(1)])
+
+    publish_from_history(
+        cache_dir=cache, data_dir=data, disclosure_records={}, now=NOW, tool_version="0.1.0"
+    )
+
+    assert "published_at" in json.loads((data / SUMMARY_FILE).read_text())
