@@ -101,14 +101,27 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git checkout -B nightly-data
-          # Only the series. The findings themselves are published by the Pages
-          # artifact below and reviewed into main separately; committing them
-          # here would put the same facts in two places with no way to say which
-          # is current.
-          find . -maxdepth 1 -mindepth 1 ! -name .git ! -name series -exec rm -rf {} +
-          mv series/trend.jsonl trend.jsonl
-          rmdir series
-          git add -A trend.jsonl
+          # Only the series reaches this branch. The findings themselves go out as
+          # the Pages artifact below and are reviewed into main separately;
+          # committing them here would put the same facts in two places with no
+          # way to say which is current.
+          #
+          # Emptied from the index rather than deleted from disk, and that is the
+          # whole point. This step used to run
+          #   find . -mindepth 1 ! -name .git ! -name series -exec rm -rf {} +
+          # which also removed web/, the directory the next two steps upload. So
+          # every night scanned 1,647 servers, built the site, passed the publish
+          # check, deleted the site, and then failed on a tar error naming a
+          # missing directory - and the trend point had already been pushed, so the
+          # series grew while the site never once updated. The nightly had never
+          # deployed.
+          #
+          # Leaving the working tree alone also means a step added after this one
+          # cannot be broken by it, which is what made the original shape a trap
+          # rather than merely a bug.
+          git rm -rq --cached .
+          cp series/trend.jsonl trend.jsonl
+          git add -f trend.jsonl
           git commit -q -m "trend: $(date -u +%Y-%m-%d)" || { echo "nothing changed"; exit 0; }
           git push -q --force-with-lease origin nightly-data
 
