@@ -7,6 +7,7 @@ import pytest
 from evals.golden.label import (
     LABELS,
     apply_label,
+    is_contested,
     last_labelled,
     next_unlabelled,
     observe,
@@ -281,12 +282,64 @@ def test_an_unknown_condition_is_refused() -> None:
         observe(ENTRIES, "g-0002", "true_positive", condition="vibes", reason="x", by="model")
 
 
-def test_the_published_label_prefers_a_human_and_the_richer_context() -> None:
-    """The benchmark publishes the best judgement available: a human over a
-    model, and the enclosing function over the window, because the narrow
-    window is the condition shown to be lossy."""
+def test_one_model_observation_is_published_as_it_stands() -> None:
+    """With a single judgement there is nothing to weigh it against, so it is
+    the best available answer."""
     entries = observe(ENTRIES, "g-0002", "unsure", condition="window", reason="x", by="model")
+
     assert published_label(entries[1]) == "unsure"
 
+
+def test_conditions_that_agree_are_published() -> None:
+    """Agreement across the contexts is the case where the annotation choice did
+    not matter, which is most of them."""
+    entries = observe(ENTRIES, "g-0002", "true_positive", condition="window", reason="x", by="model")
     entries = observe(entries, "g-0002", "true_positive", condition="function", reason="y", by="model")
+
     assert published_label(entries[1]) == "true_positive"
+
+
+def test_conditions_that_disagree_publish_nothing() -> None:
+    """This is the experiment feeding back into the code, and it replaces a
+    preference the data refuted.
+
+    The previous rule preferred the enclosing function over the window, on the
+    stated grounds that the window was "the condition shown to be lossy". The
+    experiment on 2026-09-26 found no such thing: no directional effect on either
+    taint rule combined, and the two rules predicted to move disagreed with each
+    other. What it did find is that the contexts reach different verdicts on
+    roughly one finding in five.
+
+    So there is no measured basis for preferring either, and picking one would
+    publish an arbitrary verdict on exactly the findings where the answer is
+    known to be unstable. A contested finding has no published label, and its
+    share becomes a measured uncertainty the benchmark can report - which is
+    worth more than a number that looks decisive and is not.
+    """
+    entries = observe(ENTRIES, "g-0002", "true_positive", condition="window", reason="x", by="model")
+    entries = observe(entries, "g-0002", "false_positive", condition="function", reason="y", by="model")
+
+    assert published_label(entries[1]) is None
+
+
+def test_a_human_judgement_settles_a_contested_finding() -> None:
+    """Ground truth is condition-independent: it is established from whatever it
+    takes to answer, not from one of the two views under test. So it outranks any
+    disagreement between them rather than joining it."""
+    entries = observe(ENTRIES, "g-0002", "true_positive", condition="window", reason="x", by="model")
+    entries = observe(entries, "g-0002", "false_positive", condition="function", reason="y", by="model")
+    entries = apply_label(entries, "g-0002", "true_positive", reason="read the caller")
+
+    assert published_label(entries[1]) == "true_positive"
+
+
+def test_a_contested_finding_is_identifiable_not_merely_unlabelled() -> None:
+    """An entry nobody judged and an entry the two contexts disagreed about both
+    end up without a published label, and they are not the same thing: one needs
+    a judgement, the other needs a human to break a tie. Reporting them together
+    would hide the measured instability inside ordinary incompleteness."""
+    entries = observe(ENTRIES, "g-0002", "true_positive", condition="window", reason="x", by="model")
+    entries = observe(entries, "g-0002", "false_positive", condition="function", reason="y", by="model")
+
+    assert is_contested(entries[1])
+    assert not is_contested(entries[0])

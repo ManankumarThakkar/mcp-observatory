@@ -82,19 +82,63 @@ def observe(
 
 
 def published_label(entry: Mapping[str, Any]) -> str | None:
-    """The best judgement available for one entry.
+    """The best judgement available for one entry, or None where there is none.
 
-    A human over a model, and the enclosing function over the window: the
-    narrow window is the condition measured to be lossy, so publishing a
-    judgement made under it when a richer one exists would publish the known
-    error rather than the correction.
+    A human judgement settles it outright. Ground truth is condition-independent:
+    it is established from whatever it takes to answer, not from one of the two
+    views under test, so it outranks a disagreement between them rather than
+    joining it.
+
+    Otherwise the model observations must agree. Where they disagree the entry has
+    no published label.
+
+    That rule replaced one the data refuted, and the replacement is the point.
+    The previous version preferred the enclosing function over the window, on the
+    stated grounds that the window was "the condition measured to be lossy". The
+    experiment on 2026-09-26 measured no such thing: no directional effect over
+    117 paired taint findings, and the two rules the mechanism was predicted to
+    help disagreed with each other. What it did measure is that the two contexts
+    reach different verdicts on roughly one finding in five.
+
+    So preferring either would publish an arbitrary verdict on precisely the
+    findings whose answer is known to be unstable. Publishing nothing there, and
+    reporting the contested share as a measured uncertainty, is worth more than a
+    figure that looks decisive and is not - which is the whole premise this
+    project is built on.
     """
+    human = entry.get("label")
+    if human is not None:
+        return str(human)
+
     observations = entry.get("observations") or {}
-    for condition in ("function", "window"):
-        seen = observations.get(condition)
-        if seen:
-            return str(seen["label"])
+    labels = {
+        str(seen["label"])
+        for seen in observations.values()
+        if isinstance(seen, Mapping) and seen.get("label") is not None
+    }
+    if len(labels) == 1:
+        return labels.pop()
     return None
+
+
+def is_contested(entry: Mapping[str, Any]) -> bool:
+    """Whether the contexts reached different verdicts and no human has settled it.
+
+    Distinct from simply unlabelled, and the distinction has to survive into the
+    published figures: an entry nobody judged needs a judgement, while a contested
+    one needs a human to break a tie between two judgements that already exist.
+    Counting them together would hide measured instability inside ordinary
+    incompleteness, which is the more flattering of the two and the less true.
+    """
+    if entry.get("label") is not None:
+        return False
+    observations = entry.get("observations") or {}
+    labels = {
+        str(seen["label"])
+        for seen in observations.values()
+        if isinstance(seen, Mapping) and seen.get("label") is not None
+    }
+    return len(labels) > 1
 
 
 def next_unlabelled(entries: Sequence[Mapping[str, Any]]) -> Mapping[str, Any] | None:

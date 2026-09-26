@@ -502,3 +502,55 @@ def per_rule_effects(entries: Sequence[Mapping[str, Any]]) -> dict[str, PairedEf
         )
         for rule_id in rules
     }
+
+
+def verdict(probability: float) -> str:
+    """The classification a calibrated probability implies.
+
+    At the midpoint, not at a tuned threshold. One half is simply what "more
+    likely than not" means for a calibrated number, so it needs no support from
+    the data and cannot be accused of having been picked to suit it. Tuning a
+    threshold is for trading precision against recall, and that trade needs
+    ground truth this does not yet have.
+
+    The choice is also not load-bearing: the flip share this feeds is stable
+    between 16% and 22% across thresholds from 0.40 to 0.70, which is reported
+    beside it so a reader can see that for themselves.
+    """
+    return "true_positive" if probability >= UNDECIDED else "false_positive"
+
+
+def record_verdicts(entries: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    """Turn each condition's probability into a recorded observation.
+
+    Recorded rather than recomputed on demand, so a disagreement between the two
+    contexts is visible in the data to anyone reading it. Until these exist,
+    `is_contested` reports nothing on real entries however far apart the contexts
+    are, because it reads observations and the runner had written only
+    probabilities.
+
+    A human observation is never overwritten. Agreement between a human and a
+    model is a figure this project intends to publish, and an overwrite destroys
+    the thing being measured.
+    """
+    updated = []
+    for entry in entries:
+        fresh = dict(entry)
+        observations = dict(fresh.get("observations") or {})
+        probabilities = fresh.get("probabilities") or {}
+        if isinstance(probabilities, Mapping):
+            for condition, probability in probabilities.items():
+                if not isinstance(probability, int | float):
+                    continue
+                existing = observations.get(condition)
+                if isinstance(existing, Mapping) and existing.get("labelled_by") == "human":
+                    continue
+                observations[condition] = {
+                    "label": verdict(float(probability)),
+                    "reason": f"calibrated probability {probability:.2f} at the midpoint",
+                    "labelled_by": "model",
+                }
+        if observations:
+            fresh["observations"] = observations
+        updated.append(fresh)
+    return updated

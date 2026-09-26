@@ -1,5 +1,7 @@
 """The comparison the paper rests on, computed rather than eyeballed."""
 
+from typing import Any
+
 import pytest
 
 from evals.harness.experiment import ConditionResult, compare_conditions
@@ -481,3 +483,83 @@ def test_each_rule_gets_its_own_effect_so_one_cannot_carry_the_others() -> None:
 
     assert effects["SHELL-EXEC-UNSAFE"].more_decisive == 2
     assert effects["PATH-TRAVERSAL"].less_decisive == 1
+
+
+def test_a_probability_becomes_a_verdict_at_the_midpoint() -> None:
+    """A benchmark publishes a classification, so the probability has to become
+    one somewhere.
+
+    The midpoint, not a tuned threshold. One half is what "more likely than not"
+    means for a calibrated number, so it needs no justification from the data and
+    cannot be accused of having been chosen to suit it. A tuned threshold has its
+    place when precision and recall are being traded, and that trade needs ground
+    truth this does not have.
+    """
+    from evals.harness.experiment import verdict
+
+    assert verdict(0.80) == "true_positive"
+    assert verdict(0.20) == "false_positive"
+    assert verdict(0.50) == "true_positive", "one half is not below one half"
+
+
+def test_each_condition_s_verdict_is_recorded_as_its_own_observation() -> None:
+    """Recorded, so a disagreement between the contexts is visible in the data
+    rather than recomputable only by whoever remembers the probabilities are
+    there. `is_contested` reads observations, and until they exist it reports
+    nothing on real entries however much the contexts disagree."""
+    from evals.golden.label import is_contested
+    from evals.harness.experiment import record_verdicts
+
+    entries: list[dict[str, Any]] = [
+        {
+            "entry_id": "a",
+            "rule_id": "SHELL-EXEC-UNSAFE",
+            "probabilities": {"window": 0.80, "function": 0.20},
+        },
+        {
+            "entry_id": "b",
+            "rule_id": "SHELL-EXEC-UNSAFE",
+            "probabilities": {"window": 0.80, "function": 0.90},
+        },
+    ]
+
+    updated = record_verdicts(entries)
+
+    assert updated[0]["observations"]["window"]["label"] == "true_positive"
+    assert updated[0]["observations"]["function"]["label"] == "false_positive"
+    assert is_contested(updated[0])
+    assert not is_contested(updated[1])
+
+
+def test_recording_a_verdict_does_not_overwrite_a_human_judgement() -> None:
+    """A human observation supersedes a model one rather than being replaced by
+    it, and agreement between them is a figure this project intends to publish.
+    An overwrite would destroy the thing being measured."""
+    from evals.harness.experiment import record_verdicts
+
+    entries: list[dict[str, Any]] = [
+        {
+            "entry_id": "a",
+            "rule_id": "SHELL-EXEC-UNSAFE",
+            "probabilities": {"window": 0.80},
+            "observations": {
+                "window": {"label": "false_positive", "reason": "read it", "labelled_by": "human"}
+            },
+        }
+    ]
+
+    updated = record_verdicts(entries)
+
+    assert updated[0]["observations"]["window"]["labelled_by"] == "human"
+    assert updated[0]["observations"]["window"]["label"] == "false_positive"
+
+
+def test_an_entry_with_no_probability_gains_no_observation() -> None:
+    """A call never made must not become a verdict."""
+    from evals.harness.experiment import record_verdicts
+
+    entries: list[dict[str, Any]] = [
+        {"entry_id": "a", "rule_id": "SHELL-EXEC-UNSAFE", "probabilities": {}}
+    ]
+
+    assert not (record_verdicts(entries)[0].get("observations") or {})

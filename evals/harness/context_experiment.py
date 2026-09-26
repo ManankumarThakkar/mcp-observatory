@@ -10,7 +10,7 @@ from typing import Any
 from analyzer.triage.base import Adjudicator, as_condition
 from analyzer.triage.cache import CACHE_PATH, TriageCache, adjudicate
 from analyzer.triage.jev import JevAdjudicator, post_json
-from evals.golden.label import CONDITIONS
+from evals.golden.label import CONDITIONS, is_contested, published_label
 from evals.harness.experiment import (
     PairedEffect,
     eligible,
@@ -18,6 +18,7 @@ from evals.harness.experiment import (
     paired_decisiveness,
     per_rule_effects,
     record_probabilities,
+    record_verdicts,
     split_by_prediction,
 )
 
@@ -104,6 +105,11 @@ def run(
         entries = record_probabilities(entries, condition, answered)
         _write(path, entries)
 
+    # Verdicts recorded so a disagreement between the contexts is visible in the
+    # data, not merely recomputable by whoever remembers the probabilities exist.
+    entries = record_verdicts(entries)
+    _write(path, entries)
+
     predicted, control = split_by_prediction(entries)
     return (
         {"predicted": paired_decisiveness(predicted)},
@@ -186,6 +192,20 @@ def main(argv: Sequence[str] | None = None) -> int:
         "  A share that holds across the range is not an artefact of one "
         "threshold. Concentration is printed because a share drawn mostly from "
         "one repository is a fact about that repository."
+    )
+
+    # The consequence for the benchmark, which is what any of this was for.
+    contested = [entry for entry in entries if is_contested(entry)]
+    publishable = [entry for entry in entries if published_label(entry) is not None]
+    print(
+        f"\nBenchmark consequence: {len(contested)} of {len(entries)} entries are "
+        f"contested - the two contexts reach different verdicts and no human has "
+        f"settled it - so they carry no published label."
+    )
+    print(
+        f"  {len(publishable)} entries have a publishable label. A contested "
+        "finding is not the same as an unjudged one: it needs a human to break a "
+        "tie between two judgements that already exist."
     )
     return 0
 
