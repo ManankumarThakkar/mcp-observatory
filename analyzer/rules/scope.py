@@ -62,6 +62,31 @@ CORS_KEYS = frozenset(
 )
 CORS_HEADER = "access-control-allow-origin"
 
+# Shapes that only exist in a deployed HTTP handler: a Cloudflare Worker, a Deno
+# or Bun server, anything built on the Fetch API. Their presence is what lets the
+# origin check apply its own stated precondition.
+#
+# Why the origin claim needs it. The description says the reach is wider than a
+# LOCAL tool needs, and nothing verified "local". Measured on the golden set: 36
+# of 60 findings came from deployed servers, and 9 of the 10 hand-labelled ones
+# were false positives - every contested one for this reason alone. A wildcard
+# origin cannot be combined with allow-credentials, so a browser never sends
+# cookies to it; on a public read-only endpoint of a deployed service it is the
+# correct configuration rather than excess reach. The claim holds for a local
+# server, where a page in the user's browser could otherwise drive a tool on
+# their machine.
+#
+# Express is deliberately absent. An MCP server often runs a local Express
+# listener, so it says nothing either way, and anything ambiguous has to count as
+# local: suppressing on a weak signal is how narrowing a rule silently disables
+# it on the code it exists to protect.
+DEPLOYED_MARKERS = (
+    "new Response(",
+    "ExecutionContext",
+    "Deno.serve",
+    "Bun.serve",
+)
+
 # `*` as a string, or `true` as a boolean, which reflects whatever origin
 # asked. The string "true" is neither: an earlier version conflated them and
 # reported a header whose value was the word true, describing it in the
@@ -166,8 +191,25 @@ def _names_the_home_directory(parsed: ParsedFile, node: Node) -> bool:
     return parsed.text(callee) in HOME_CALLS
 
 
-def _scopes_in(parsed: ParsedFile) -> Iterator[tuple[int, str]]:
-    """Yield (line, what is wide) for every overbroad scope declared in code."""
+def _looks_deployed(source: str) -> bool:
+    """Whether this file is a deployed HTTP handler rather than a local tool.
+
+    Positive evidence only, and the asymmetry is the point: a file with no marker
+    is treated as local and still reported. The failure mode of an exclusion is
+    silently switching a check off on the code it was protecting, so ambiguity has
+    to resolve toward reporting.
+    """
+    return any(marker in source for marker in DEPLOYED_MARKERS)
+
+
+def _scopes_in(parsed: ParsedFile, *, deployed: bool = False) -> Iterator[tuple[int, str]]:
+    """Yield (line, what is wide) for every overbroad scope declared in code.
+
+    `deployed` suppresses the origin claim alone. The interface and filesystem
+    claims are unaffected, because a service treating the filesystem root as its
+    scope is overbroad whoever runs it, and suppressing those too would trade one
+    silent gap for another.
+    """
     cursor = QueryCursor(Query(parsed.grammar, SCOPE_QUERY))
     found: set[tuple[int, str]] = set()
 
@@ -185,7 +227,7 @@ def _scopes_in(parsed: ParsedFile) -> Iterator[tuple[int, str]]:
             literal = _literal(parsed, value)
             if key in HOST_KEYS and literal in EVERY_INTERFACE:
                 found.add((value.start_point[0] + 1, f"listens on {literal}"))
-            elif key in CORS_KEYS and _wildcard_origin(parsed, value):
+            elif key in CORS_KEYS and not deployed and _wildcard_origin(parsed, value):
                 found.add(
                     (value.start_point[0] + 1, f"accepts any origin ({parsed.text(value)})")
                 )
@@ -310,5 +352,5 @@ class ScopeOverbroadRule:
                 location=Location(file=ctx.relative_path, line=line),
                 evidence=reason[:MAX_EVIDENCE_CHARS],
             )
-            for line, reason in _scopes_in(parsed)
+            for line, reason in _scopes_in(parsed, deployed=_looks_deployed(ctx.source))
         ]
