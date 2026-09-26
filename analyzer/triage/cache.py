@@ -45,6 +45,14 @@ def cache_key(arm: str, entry: Mapping[str, Any]) -> str:
     ).hexdigest()
 
 
+# Where adjudications already paid for are kept. Declared here rather than as a
+# default buried in a command's arguments, because the pilot's own runner lived
+# in an untracked file that is now gone: the path it used survived only as data
+# on disk, and a second command guessing a different name would have re-bought
+# every answer. The key already carries the arm, so one file serves every arm.
+CACHE_PATH = Path(".cache/triage-jev.jsonl")
+
+
 class TriageCache:
     """Adjudications already paid for, kept on disk.
 

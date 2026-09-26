@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from analyzer.triage.base import Adjudicator, as_condition
-from analyzer.triage.cache import TriageCache, adjudicate
+from analyzer.triage.cache import CACHE_PATH, TriageCache, adjudicate
 from analyzer.triage.jev import JevAdjudicator, post_json
 from evals.golden.label import CONDITIONS
 from evals.harness.experiment import (
@@ -115,7 +115,7 @@ def _report(label: str, effect: PairedEffect) -> None:
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0] if __doc__ else "")
     parser.add_argument("--path", type=Path, default=Path(".cache/golden-entries.jsonl"))
-    parser.add_argument("--cache", type=Path, default=Path(".cache/triage-cache.jsonl"))
+    parser.add_argument("--cache", type=Path, default=CACHE_PATH)
     parser.add_argument("--max-calls", type=int, default=DEFAULT_MAX_CALLS)
     args = parser.parse_args(argv)
     if not args.path.exists():
