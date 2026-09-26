@@ -1,5 +1,11 @@
-
-from analyzer.triage.base import MAX_LINE_CHARS, MAX_WINDOW_CHARS, TRUNCATION_MARKER, present
+from analyzer.triage.base import (
+    FLAGGED_MARKER,
+    MAX_LINE_CHARS,
+    MAX_WINDOW_CHARS,
+    TRUNCATION_MARKER,
+    as_condition,
+    present,
+)
 
 
 def _entry(context: str, offset: int = 0) -> dict[str, object]:
@@ -62,3 +68,79 @@ def test_repeated_lines_in_a_window_are_all_kept() -> None:
     shown = present(_entry("}\n}\n}", offset=1))
 
     assert shown.count("}") == 3
+
+
+def test_projecting_an_entry_onto_the_function_condition_moves_its_marker() -> None:
+    """The second condition is applied by rewriting the entry, not by asking
+    the presenter for a variant.
+
+    Everything downstream - the presenter, the adjudication cache key, each
+    model arm - then sees an ordinary entry and cannot treat one condition
+    differently from the other. That is the property the comparison needs: a
+    difference in the result has to come from the context, and an arm with a
+    `condition` parameter is an arm that could branch on it.
+
+    The offset moves with the text because the function begins at a different
+    line of the file than the window does. Marking the window's index inside
+    the function would put the marker on unrelated code, and the labeller would
+    answer about code nobody flagged while the comparison still reported two
+    contexts.
+    """
+    entry = {
+        "context": "const a = 1",
+        "flagged_offset": 0,
+        "context_function": "function f(p) {\n  const q = p;\n  run(q);\n}",
+        "flagged_offset_function": 2,
+    }
+
+    shown = present(as_condition(entry, "function"))
+
+    marked = [line for line in shown.splitlines() if line.startswith(FLAGGED_MARKER)]
+    assert len(marked) == 1
+    assert "run(q)" in marked[0]
+
+
+def test_the_two_conditions_key_the_adjudication_cache_differently() -> None:
+    """Without this the second condition would be answered from the first
+    condition's cached verdict, and the experiment would report that context
+    makes no difference because it never asked twice."""
+    from analyzer.triage.cache import cache_key
+
+    entry = {
+        "context": "const a = 1",
+        "flagged_offset": 0,
+        "context_function": "function f(p) {\n  const q = p;\n  run(q);\n}",
+        "flagged_offset_function": 2,
+        "rule_id": "SHELL-EXEC-UNSAFE",
+        "language": "typescript",
+    }
+
+    window = cache_key("jev", as_condition(entry, "window"))
+    function = cache_key("jev", as_condition(entry, "function"))
+
+    assert window != function
+
+
+def test_projecting_onto_a_condition_the_entry_lacks_is_refused() -> None:
+    """Silently falling back to the window would record two observations of one
+    context and publish them as a comparison between two, which is the single
+    result this experiment must not produce."""
+    import pytest
+
+    entry = {"context": "const a = 1", "flagged_offset": 0}
+
+    with pytest.raises(KeyError):
+        as_condition(entry, "function")
+
+
+def test_the_window_projection_leaves_the_entry_as_it_stands() -> None:
+    """The first condition must be the entry exactly as every other consumer
+    already sees it, or the comparison has two manipulations in it."""
+    entry = {
+        "context": "const a = 1",
+        "flagged_offset": 0,
+        "context_function": "function f() {}",
+        "flagged_offset_function": 0,
+    }
+
+    assert present(as_condition(entry, "window")) == present(entry)

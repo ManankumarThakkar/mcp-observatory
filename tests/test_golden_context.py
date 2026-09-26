@@ -266,3 +266,280 @@ def test_a_clone_is_released_even_when_its_scan_fails(tmp_path: Path) -> None:
     )
 
     assert list(tmp_path.rglob("index.ts")) == []
+
+
+def test_a_taint_rule_captures_the_function_that_encloses_its_sink() -> None:
+    """Measured while labelling: a third of SHELL-EXEC-UNSAFE entries could not
+    be decided from twelve lines either side, and every one failed the same
+    way - the sink was visible and the origin of the interpolated value was
+    not. `execSync(cmd)` is undecidable without seeing where cmd came from.
+
+    Twelve lines was measured for probability spread on a decision model, which
+    is a different requirement from decidability by a reader. A taint rule's
+    finding is judged from the function that encloses it, because that is the
+    smallest unit containing both the sink and the parameter feeding it.
+    """
+    from evals.golden.context import capture_for_judgement
+
+    source = "\n".join(
+        ["import { execSync } from 'child_process';", "", "const PREFIX = 'safe';", ""]
+        + [f"// filler {n}" for n in range(20)]
+        + [
+            "export function runTool(userInput: string): string {",
+            "  const cmd = `ls ${userInput}`;",
+            "  return execSync(cmd).toString();",
+            "}",
+        ]
+    )
+    flagged = source.splitlines().index("  return execSync(cmd).toString();") + 1
+
+    captured = capture_for_judgement(source, flagged, suffix=".ts", enclosing=True)
+
+    assert captured is not None
+    assert "function runTool(userInput: string)" in captured, "the origin must be visible"
+    assert "execSync(cmd)" in captured
+
+
+def test_a_window_rule_still_gets_its_window() -> None:
+    """UNICODE-CONCEAL and SCOPE-OVERBROAD are decided from the line and what
+    surrounds it; an enclosing function would add noise, and for a codepoint
+    scan there may be no function at all."""
+    from evals.golden.context import capture_for_judgement
+
+    source = "\n".join(f"line {n}" for n in range(1, 51))
+
+    captured = capture_for_judgement(source, 25, suffix=".ts", enclosing=False)
+
+    assert captured is not None
+    assert "line 13" in captured and "line 37" in captured
+
+
+def test_a_sink_outside_any_function_falls_back_to_the_window() -> None:
+    """Top-level code has no enclosing function, and returning nothing would
+    silently drop the entry rather than judge it."""
+    from evals.golden.context import capture_for_judgement
+
+    source = "\n".join([f"// filler {n}" for n in range(20)] + ["execSync('ls');"])
+
+    captured = capture_for_judgement(source, 21, suffix=".ts", enclosing=True)
+
+    assert captured is not None
+    assert "execSync('ls')" in captured
+
+
+def test_an_enormous_function_is_still_bounded() -> None:
+    """A thousand-line handler would blow past the size cap the presentation
+    layer enforces and cost tokens nobody agreed to."""
+    from evals.golden.context import capture_for_judgement
+
+    body = "\n".join(f"  const x{n} = {n};" for n in range(2000))
+    source = f"function huge() {{\n{body}\n  execSync(cmd);\n}}"
+    flagged = source.splitlines().index("  execSync(cmd);") + 1
+
+    captured = capture_for_judgement(source, flagged, suffix=".ts", enclosing=True)
+
+    assert captured is not None
+    assert len(captured) < 20_000
+    assert "execSync(cmd)" in captured
+
+
+def test_a_taint_entry_carries_both_contexts_for_the_comparison() -> None:
+    """The contribution is a controlled comparison: the same finding judged
+    from a line window and from its enclosing function. That is only possible
+    if both are captured from the same clone at the same commit - capturing
+    them in separate passes would let the repository move between them and
+    confound the condition with the code.
+    """
+    from evals.golden.context import both_contexts
+
+    # The signature sits more than a window away from the sink, which is the
+    # condition being tested: a body long enough that twelve lines either side
+    # cannot reach the parameter feeding the command.
+    source = "\n".join(
+        [f"// filler {n}" for n in range(20)]
+        + ["export function runTool(userInput: string): string {", "  const cmd = `ls ${userInput}`;"]
+        + [f"  const noise{n} = {n};" for n in range(20)]
+        + ["  return execSync(cmd).toString();", "}"]
+    )
+    flagged = source.splitlines().index("  return execSync(cmd).toString();") + 1
+
+    narrow, wide = both_contexts(source, flagged, suffix=".ts")
+
+    assert narrow is not None and wide is not None
+    assert "userInput" not in narrow, "the narrow window must not reach the signature"
+    assert "function runTool(userInput: string)" in wide.text
+
+
+def test_a_non_taint_entry_has_no_second_condition() -> None:
+    """UNICODE-CONCEAL and SCOPE-OVERBROAD are unchanged by the manipulation,
+    so carrying a second identical context would imply an experiment that was
+    not run on them."""
+    from evals.golden.context import both_contexts
+
+    source = "\n".join(f"line {n}" for n in range(1, 51))
+
+    narrow, wide = both_contexts(source, 25, suffix=".md")
+
+    assert narrow is not None
+    assert wide is None, "no enclosing function exists in a document"
+
+
+def test_the_capture_returns_both_contexts_for_a_taint_finding(tmp_path: Path) -> None:
+    """Both conditions must reach the entries file, or the experiment cannot be
+    run from it."""
+    source = "\n".join(
+        [f"// filler {n}" for n in range(20)]
+        + ["export function runTool(userInput: string): string {", "  const cmd = `ls ${userInput}`;"]
+        + [f"  const noise{n} = {n};" for n in range(20)]
+        + ["  return execSync(cmd).toString();", "}"]
+    )
+    line = source.splitlines().index("  return execSync(cmd).toString();") + 1
+    finding = Finding(
+        server_id="a/one", commit_sha="a" * 40, rule_id="SHELL-EXEC-UNSAFE",
+        severity="critical", confidence="low",
+        location=Location(file="index.ts", line=line), evidence="execSync(cmd)",
+    )
+
+    result = capture_for_findings(
+        [finding],
+        repo_urls={"a/one": "https://github.com/a/one"},
+        clone=_clone_writing(source),
+        scan=lambda root, server_id, commit_sha: ScanReport(findings=(finding,), skipped=()),
+        workdir=tmp_path,
+    )
+
+    assert finding.finding_id in result.contexts
+    assert finding.finding_id in result.functions
+    assert "userInput" not in result.contexts[finding.finding_id]
+    enclosing = result.functions[finding.finding_id]
+    assert "function runTool(userInput: string)" in enclosing.text
+    assert enclosing.text.splitlines()[enclosing.flagged_offset].strip().startswith("return execSync")
+
+
+def test_a_sibling_function_on_the_flagged_line_is_not_mistaken_for_the_enclosing_one() -> None:
+    """Found in captured data, and it would have corrupted the experiment.
+
+    A finding carries a line but no column, so every function node overlapping
+    that line is a candidate, and "smallest wins" then actively prefers the
+    wrong one. Here an inline `.catch(() => null)` sits on the flagged line, so
+    the smallest overlapping function is ten characters of unrelated code that
+    cannot contain a path traversal at all. Forty-five of a hundred and
+    seventeen captured functions came out smaller than the line window this way,
+    and each would have been presented to a labeller as the finding's enclosing
+    scope: an undecidable entry produced by the instrument rather than by the
+    code.
+    """
+    source = (
+        "export async function writeKey(args) {\n"
+        "  const fileAbs = path.join(base, args.name);\n"
+        '  const existing = await fs.readFile(fileAbs, "utf8").catch(() => null);\n'
+        "  return existing;\n"
+        "}"
+    )
+    from evals.golden.context import capture_for_judgement
+
+    captured = capture_for_judgement(source, 3, suffix=".ts", enclosing=True)
+
+    assert captured is not None
+    assert "() => null" != captured.strip()
+    # Not "export async ...": the `export` keyword belongs to an enclosing
+    # export_statement, so the function node starts at `async`.
+    assert captured.strip().startswith("async function writeKey")
+    assert "args.name" in captured, "the origin of the tainted value must be present"
+
+
+def test_a_handler_occupying_the_whole_flagged_line_is_still_chosen() -> None:
+    """The guard against over-correcting the sibling fix.
+
+    Requiring a candidate to cover the flagged line must not reject a genuine
+    one-line handler, which is a common shape in MCP servers and is exactly the
+    unit wanted. If this fails, the fix has traded a wrong small context for a
+    needlessly large one.
+    """
+    source = (
+        "server.tool(\n"
+        '  "read",\n'
+        "  async (args) => fs.readFile(path.join(base, args.name)),\n"
+        ");"
+    )
+    from evals.golden.context import capture_for_judgement
+
+    captured = capture_for_judgement(source, 3, suffix=".ts", enclosing=True)
+
+    assert captured is not None
+    assert captured.strip().startswith("async (args) =>")
+
+
+def test_the_enclosing_context_carries_the_flagged_line_s_position_within_it() -> None:
+    """A context without its own marker offset cannot be presented honestly.
+
+    The window and the function start at different lines of the file, so one
+    offset cannot locate the flagged line in both. Capturing the text alone
+    would leave the presenter to guess, and searching for the line by its text
+    is not a fallback: a function legitimately repeats a line - a bare closing
+    brace, the same call twice - and the first match may be the wrong one.
+    """
+    from evals.golden.context import both_contexts
+
+    source = "\n".join(
+        ["// header"]
+        + ["export function runTool(userInput: string): string {"]
+        + [f"  const noise{n} = {n};" for n in range(5)]
+        + ["  return execSync(`ls ${userInput}`).toString();", "}"]
+    )
+    flagged = source.splitlines().index("  return execSync(`ls ${userInput}`).toString();") + 1
+
+    _, enclosing = both_contexts(source, flagged, suffix=".ts")
+
+    assert enclosing is not None
+    lines = enclosing.text.splitlines()
+    assert lines[enclosing.flagged_offset] == "  return execSync(`ls ${userInput}`).toString();"
+
+
+def test_a_non_taint_finding_inside_a_function_still_gets_the_second_context(
+    tmp_path: Path,
+) -> None:
+    """The experiment's control group, and the reason it can answer its own
+    strongest objection.
+
+    If a wider context raises an adjudicator's confidence, the dull explanation
+    is that more text simply reads as more evidence. The way to rule that out is
+    a set of findings the manipulation is predicted *not* to help: a rule decided
+    by the object a value is declared in, not by the path that reaches it. Those
+    entries need the second context captured so the prediction can be tested,
+    even though the prediction is that nothing moves.
+
+    Which rules are expected to move is already recorded on the rules
+    themselves, written for unrelated reasons before this experiment existed, so
+    the hypothesis is registered independently of the data rather than chosen
+    once the numbers were visible. That makes it an analysis-time distinction,
+    not a capture-time one.
+    """
+    source = "\n".join(
+        ["function registerTool(server) {"]
+        + [f"  const noise{n} = {n};" for n in range(3)]
+        + ['  server.addTool({ name: "read", origin: "*" });', "}"]
+    )
+    line = source.splitlines().index('  server.addTool({ name: "read", origin: "*" });') + 1
+    finding = Finding(
+        server_id="a/one",
+        commit_sha="a" * 40,
+        rule_id="SCOPE-OVERBROAD",
+        severity="high",
+        confidence="low",
+        location=Location(file="index.ts", line=line),
+        evidence='origin: "*"',
+    )
+
+    result = capture_for_findings(
+        [finding],
+        repo_urls={"a/one": "https://github.com/a/one"},
+        clone=_clone_writing(source),
+        scan=lambda root, server_id, commit_sha: ScanReport(findings=(finding,), skipped=()),
+        workdir=tmp_path,
+    )
+
+    assert finding.finding_id in result.functions, (
+        "a control entry needs the second context, or the placebo cannot be tested"
+    )
+    assert "registerTool" in result.functions[finding.finding_id].text

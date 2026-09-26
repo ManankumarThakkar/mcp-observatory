@@ -7,9 +7,13 @@ import pytest
 from evals.golden.label import (
     LABELS,
     apply_label,
+    is_contested,
     last_labelled,
     next_unlabelled,
+    observe,
     progress,
+    published_label,
+    record_truth,
     render,
 )
 
@@ -232,3 +236,169 @@ def test_an_unknown_labeller_is_refused() -> None:
     """Provenance with a free-text field is provenance nobody can filter on."""
     with pytest.raises(ValueError, match="labeller"):
         apply_label(ENTRIES, "g-0002", "true_positive", reason="x", by="committee")
+
+
+def test_a_judgement_is_an_observation_under_a_condition() -> None:
+    """The contribution is a comparison between two conditions, and the human
+    validation is a second labeller on the same entries. Both need a judgement
+    to carry who made it and what they were shown - a single `label` field can
+    represent neither.
+    """
+    updated = observe(ENTRIES, "g-0002", "true_positive",
+                      condition="window", reason="reachable", by="model")
+
+    assert updated[1]["observations"]["window"]["label"] == "true_positive"
+    assert updated[1]["observations"]["window"]["labelled_by"] == "model"
+
+
+def test_the_same_entry_holds_both_conditions_independently() -> None:
+    """The whole experiment is that these can differ. Storing one would make
+    the effect unmeasurable."""
+    entries = observe(ENTRIES, "g-0002", "unsure", condition="window",
+                      reason="origin not visible", by="model")
+    entries = observe(entries, "g-0002", "true_positive", condition="function",
+                      reason="parameter reaches the shell unquoted", by="model")
+
+    obs = entries[1]["observations"]
+    assert obs["window"]["label"] == "unsure"
+    assert obs["function"]["label"] == "true_positive"
+
+
+def test_a_human_observation_sits_beside_a_model_one_rather_than_replacing_it() -> None:
+    """Agreement between them is the figure to report, and overwriting would
+    destroy the thing being measured."""
+    entries = observe(ENTRIES, "g-0002", "true_positive", condition="function",
+                      reason="x", by="model")
+    entries = observe(entries, "g-0002", "false_positive", condition="function",
+                      reason="y", by="human")
+
+    obs = entries[1]["observations"]["function"]
+    assert obs["label"] == "false_positive", "the human judgement is the ground truth"
+    assert obs["superseded"]["label"] == "true_positive"
+    assert obs["superseded"]["labelled_by"] == "model"
+
+
+def test_an_unknown_condition_is_refused() -> None:
+    with pytest.raises(ValueError, match="condition"):
+        observe(ENTRIES, "g-0002", "true_positive", condition="vibes", reason="x", by="model")
+
+
+def test_one_model_observation_is_published_as_it_stands() -> None:
+    """With a single judgement there is nothing to weigh it against, so it is
+    the best available answer."""
+    entries = observe(ENTRIES, "g-0002", "unsure", condition="window", reason="x", by="model")
+
+    assert published_label(entries[1]) == "unsure"
+
+
+def test_conditions_that_agree_are_published() -> None:
+    """Agreement across the contexts is the case where the annotation choice did
+    not matter, which is most of them."""
+    entries = observe(ENTRIES, "g-0002", "true_positive", condition="window", reason="x", by="model")
+    entries = observe(entries, "g-0002", "true_positive", condition="function", reason="y", by="model")
+
+    assert published_label(entries[1]) == "true_positive"
+
+
+def test_conditions_that_disagree_publish_nothing() -> None:
+    """This is the experiment feeding back into the code, and it replaces a
+    preference the data refuted.
+
+    The previous rule preferred the enclosing function over the window, on the
+    stated grounds that the window was "the condition shown to be lossy". The
+    experiment on 2026-09-26 found no such thing: no directional effect on either
+    taint rule combined, and the two rules predicted to move disagreed with each
+    other. What it did find is that the contexts reach different verdicts on
+    roughly one finding in five.
+
+    So there is no measured basis for preferring either, and picking one would
+    publish an arbitrary verdict on exactly the findings where the answer is
+    known to be unstable. A contested finding has no published label, and its
+    share becomes a measured uncertainty the benchmark can report - which is
+    worth more than a number that looks decisive and is not.
+    """
+    entries = observe(ENTRIES, "g-0002", "true_positive", condition="window", reason="x", by="model")
+    entries = observe(entries, "g-0002", "false_positive", condition="function", reason="y", by="model")
+
+    assert published_label(entries[1]) is None
+
+
+def test_a_human_judgement_settles_a_contested_finding() -> None:
+    """Ground truth is condition-independent: it is established from whatever it
+    takes to answer, not from one of the two views under test. So it outranks any
+    disagreement between them rather than joining it."""
+    entries = observe(ENTRIES, "g-0002", "true_positive", condition="window", reason="x", by="model")
+    entries = observe(entries, "g-0002", "false_positive", condition="function", reason="y", by="model")
+    entries = apply_label(entries, "g-0002", "true_positive", reason="read the caller")
+
+    assert published_label(entries[1]) == "true_positive"
+
+
+def test_a_contested_finding_is_identifiable_not_merely_unlabelled() -> None:
+    """An entry nobody judged and an entry the two contexts disagreed about both
+    end up without a published label, and they are not the same thing: one needs
+    a judgement, the other needs a human to break a tie. Reporting them together
+    would hide the measured instability inside ordinary incompleteness."""
+    entries = observe(ENTRIES, "g-0002", "true_positive", condition="window", reason="x", by="model")
+    entries = observe(entries, "g-0002", "false_positive", condition="function", reason="y", by="model")
+
+    assert is_contested(entries[1])
+    assert not is_contested(entries[0])
+
+
+def test_ground_truth_is_recorded_straight_to_the_file(tmp_path: Path) -> None:
+    """A judgement made outside the interactive loop still has to be durable.
+
+    The loop reads single keystrokes, which suits a person at a terminal and
+    suits nothing else. Ground truth for the contested findings is established by
+    reading code carefully rather than by pressing keys quickly, so it needs a way
+    in that is not a TTY - and it must write immediately, for the same reason the
+    loop does: work that is lost is work done twice.
+    """
+    path = tmp_path / "entries.jsonl"
+    path.write_text(
+        json.dumps({"entry_id": "g-0001", "rule_id": "SHELL-EXEC-UNSAFE", "label": None})
+        + "\n"
+        + json.dumps({"entry_id": "g-0002", "rule_id": "PATH-TRAVERSAL", "label": None})
+        + "\n",
+        encoding="utf-8",
+    )
+
+    record_truth(path, "g-0002", "true_positive", reason="the caller passes tool input")
+
+    written = [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+    assert written[1]["label"] == "true_positive"
+    # `reason`, the field the schema already uses, not a second name for it.
+    assert written[1]["reason"] == "the caller passes tool input"
+    assert written[1]["labelled_by"] == "human"
+    assert written[0]["label"] is None, "only the named entry is touched"
+
+
+def test_ground_truth_requires_a_reason(tmp_path: Path) -> None:
+    """The interactive loop lets a person press one key without explaining, on
+    the grounds that they have already spent the attention. That does not hold
+    here: these are the findings two contexts disagreed about, they are the ones a
+    reader is most likely to challenge, and a label nobody can argue with
+    individually is a label nobody can check.
+    """
+    path = tmp_path / "entries.jsonl"
+    path.write_text(
+        json.dumps({"entry_id": "g-0001", "rule_id": "SHELL-EXEC-UNSAFE", "label": None}) + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="reason"):
+        record_truth(path, "g-0001", "true_positive", reason="   ")
+
+
+def test_recording_ground_truth_refuses_an_unknown_entry(tmp_path: Path) -> None:
+    """Doing nothing looks exactly like success, and the entry would simply be
+    left unlabelled while the count said otherwise."""
+    path = tmp_path / "entries.jsonl"
+    path.write_text(
+        json.dumps({"entry_id": "g-0001", "rule_id": "SHELL-EXEC-UNSAFE", "label": None}) + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(KeyError):
+        record_truth(path, "g-9999", "true_positive", reason="x")

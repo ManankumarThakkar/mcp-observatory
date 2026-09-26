@@ -3,6 +3,7 @@
 import hashlib
 import json
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -43,6 +44,14 @@ def cache_key(arm: str, entry: Mapping[str, Any]) -> str:
     return hashlib.sha256(
         "|".join([arm, str(entry["rule_id"]), str(entry["language"]), window]).encode()
     ).hexdigest()
+
+
+# Where adjudications already paid for are kept. Declared here rather than as a
+# default buried in a command's arguments, because the pilot's own runner lived
+# in an untracked file that is now gone: the path it used survived only as data
+# on disk, and a second command guessing a different name would have re-bought
+# every answer. The key already carries the arm, so one file serves every arm.
+CACHE_PATH = Path(".cache/triage-jev.jsonl")
 
 
 class TriageCache:
@@ -109,13 +118,33 @@ class TriageCache:
             )
 
 
+@dataclass(frozen=True)
+class AdjudicationRun:
+    """What one pass over the entries produced, and what it cost.
+
+    Failures are carried beside the answers rather than raised, so one
+    unreachable entry cannot discard a run that has already been paid for. They
+    are kept apart from the entries the spend guard never reached because the two
+    look identical downstream - both simply have no answer - while calling for
+    different actions: one is re-run, the other needs the cap raised.
+
+    Cost is measured rather than reconstructed afterwards from a price list,
+    which is the same standard this project holds itself to about accuracy.
+    """
+
+    decisions: dict[str, Decision | None]
+    failures: dict[str, str]
+    calls: int
+    cost_usd: float
+
+
 def adjudicate(
     entries: Sequence[Mapping[str, Any]],
     *,
     adjudicator: Adjudicator,
     cache: TriageCache,
     max_calls: int = MAX_CALLS_PER_RUN,
-) -> dict[str, Decision | None]:
+) -> AdjudicationRun:
     """Judge every entry, paying only for the ones not already answered.
 
     `None` marks an entry the spend guard stopped short of. It is deliberately
@@ -131,22 +160,45 @@ def adjudicate(
     permanent and that finding would never be judged again.
     """
     results: dict[str, Decision | None] = {}
+    failures: dict[str, str] = {}
     spent = 0
+    cost = 0.0
 
     for entry in entries:
+        entry_id = str(entry["entry_id"])
         key = cache_key(adjudicator.name, entry)
         cached = cache.get(key)
         if cached is not None:
-            results[str(entry["entry_id"])] = cached
+            results[entry_id] = cached
             continue
 
         if spent >= max_calls:
-            results[str(entry["entry_id"])] = None
+            results[entry_id] = None
             continue
 
-        decision = adjudicator.decide(entry)
-        spent += 1
-        cache.put(key, decision)
-        results[str(entry["entry_id"])] = decision
+        try:
+            decision = adjudicator.decide(entry)
+        except Exception as exc:  # noqa: BLE001
+            # Isolated, not fatal. A single entry exhausting its retries used to
+            # abort the whole run, and against a service answering in tens of
+            # seconds that was near-certain over a few hundred calls. The
+            # orchestrator already isolates one bad repository from a corpus run
+            # for exactly this reason. Broad on purpose: any arm may raise
+            # anything, and a run that survives one failure but not another kind
+            # is a run whose completion depends on which service broke.
+            #
+            # Recorded rather than counted, because "the call failed" and "the
+            # budget ran out" call for different actions and both otherwise
+            # arrive as a missing answer.
+            failures[entry_id] = f"{type(exc).__name__}: {exc}"
+            results[entry_id] = None
+            continue
 
-    return results
+        spent += 1
+        cost += decision.cost_usd
+        cache.put(key, decision)
+        results[entry_id] = decision
+
+    return AdjudicationRun(
+        decisions=results, failures=failures, calls=spent, cost_usd=cost
+    )

@@ -59,4 +59,17 @@ class Rule(Protocol):
     # would quietly disagree with the code.
     languages: tuple[str, ...]
 
+    # What a reader needs in front of them to judge one of this rule's
+    # findings. A rule asking whether a value reaches a sink needs both ends
+    # visible, and the enclosing function is the smallest unit holding them;
+    # measured while hand-labelling, a third of SHELL-EXEC-UNSAFE findings were
+    # undecidable from twelve lines either side because the sink was shown and
+    # the origin was not. A rule asking what a piece of text says needs the
+    # text, and an enclosing function would bury it.
+    #
+    # Declared here rather than listed in the eval harness, because it is a
+    # fact about what the rule claims, and a harness-side list would not gain
+    # an entry when a sixth rule arrives.
+    needs_enclosing_function: bool
+
     def analyze(self, ctx: FileContext) -> list[Finding]: ...

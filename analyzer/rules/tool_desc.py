@@ -346,6 +346,7 @@ class ToolDescInjectionRule:
     # TypeScript and JavaScript, which the tsx grammar reads as one
     # family. The gate below uses this rather than a second copy of it.
     languages: tuple[str, ...] = ("typescript", "tsx")
+    needs_enclosing_function = False
     description = (
         "A tool or parameter description reads as an instruction addressed "
         "to the assistant rather than as a description of what the tool "

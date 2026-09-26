@@ -118,6 +118,7 @@ class ShellExecUnsafeRule:
     # TypeScript and JavaScript, which the tsx grammar reads as one
     # family. The gate below uses this rather than a second copy of it.
     languages: tuple[str, ...] = ("typescript", "tsx")
+    needs_enclosing_function = True
     description = (
         "A value an assistant supplies reaches a shell. Node's exec and "
         "execSync run their argument through a shell every time, and spawn "

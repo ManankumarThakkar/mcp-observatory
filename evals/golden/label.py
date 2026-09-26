@@ -29,6 +29,118 @@ LABELLERS: tuple[str, ...] = ("human", "model")
 # of them, and `b` because there will be slips.
 KEYS: Mapping[str, str] = {"y": "true_positive", "n": "false_positive", "u": "unsure"}
 
+# The two ways a taint finding can be presented to a judge. The comparison
+# between them is the experiment: `window` is twelve lines either side of the
+# flagged line, `function` is the function enclosing it.
+CONDITIONS: tuple[str, ...] = ("window", "function")
+
+
+def observe(
+    entries: Sequence[Mapping[str, Any]],
+    entry_id: str,
+    label: str,
+    *,
+    condition: str,
+    reason: str = "",
+    by: str = "human",
+) -> list[dict[str, Any]]:
+    """Record one judgement of one entry under one condition.
+
+    A judgement is an observation rather than a field, because two things need
+    to vary independently: what the judge was shown, and who the judge was. The
+    experiment compares conditions; the validation compares labellers. A single
+    `label` can represent neither.
+
+    A human observation supersedes a model one for the same condition rather
+    than overwriting it, because agreement between them is the figure to
+    report and an overwrite destroys the thing being measured.
+    """
+    if label not in LABELS:
+        raise ValueError(f"label must be one of {', '.join(LABELS)}, got {label!r}")
+    if condition not in CONDITIONS:
+        raise ValueError(f"condition must be one of {', '.join(CONDITIONS)}, got {condition!r}")
+    if by not in LABELLERS:
+        raise ValueError(f"labeller must be one of {', '.join(LABELLERS)}, got {by!r}")
+    if by == "model" and not reason.strip():
+        raise ValueError("a model label needs a reason, so the judgement can be audited")
+    if not any(entry["entry_id"] == entry_id for entry in entries):
+        raise KeyError(f"no entry {entry_id}")
+
+    def record(entry: Mapping[str, Any]) -> dict[str, Any]:
+        observations = dict(entry.get("observations") or {})
+        fresh: dict[str, Any] = {"label": label, "reason": reason, "labelled_by": by}
+        existing = observations.get(condition)
+        if existing is not None and existing.get("labelled_by") != by:
+            fresh["superseded"] = {k: v for k, v in existing.items() if k != "superseded"}
+        observations[condition] = fresh
+        return {**entry, "observations": observations}
+
+    return [
+        record(entry) if entry["entry_id"] == entry_id else dict(entry)
+        for entry in entries
+    ]
+
+
+def published_label(entry: Mapping[str, Any]) -> str | None:
+    """The best judgement available for one entry, or None where there is none.
+
+    A human judgement settles it outright. Ground truth is condition-independent:
+    it is established from whatever it takes to answer, not from one of the two
+    views under test, so it outranks a disagreement between them rather than
+    joining it.
+
+    Otherwise the model observations must agree. Where they disagree the entry has
+    no published label.
+
+    That rule replaced one the data refuted, and the replacement is the point.
+    The previous version preferred the enclosing function over the window, on the
+    stated grounds that the window was "the condition measured to be lossy". The
+    experiment on 2026-09-26 measured no such thing: no directional effect over
+    117 paired taint findings, and the two rules the mechanism was predicted to
+    help disagreed with each other. What it did measure is that the two contexts
+    reach different verdicts on roughly one finding in five.
+
+    So preferring either would publish an arbitrary verdict on precisely the
+    findings whose answer is known to be unstable. Publishing nothing there, and
+    reporting the contested share as a measured uncertainty, is worth more than a
+    figure that looks decisive and is not - which is the whole premise this
+    project is built on.
+    """
+    human = entry.get("label")
+    if human is not None:
+        return str(human)
+
+    observations = entry.get("observations") or {}
+    labels = {
+        str(seen["label"])
+        for seen in observations.values()
+        if isinstance(seen, Mapping) and seen.get("label") is not None
+    }
+    if len(labels) == 1:
+        return labels.pop()
+    return None
+
+
+def is_contested(entry: Mapping[str, Any]) -> bool:
+    """Whether the contexts reached different verdicts and no human has settled it.
+
+    Distinct from simply unlabelled, and the distinction has to survive into the
+    published figures: an entry nobody judged needs a judgement, while a contested
+    one needs a human to break a tie between two judgements that already exist.
+    Counting them together would hide measured instability inside ordinary
+    incompleteness, which is the more flattering of the two and the less true.
+    """
+    if entry.get("label") is not None:
+        return False
+    observations = entry.get("observations") or {}
+    labels = {
+        str(seen["label"])
+        for seen in observations.values()
+        if isinstance(seen, Mapping) and seen.get("label") is not None
+    }
+    return len(labels) > 1
+
+
 def next_unlabelled(entries: Sequence[Mapping[str, Any]]) -> Mapping[str, Any] | None:
     """The first entry still waiting for a judgement, or None if there is none."""
     return next((entry for entry in entries if entry.get("label") is None), None)
@@ -152,6 +264,40 @@ def _write(path: Path, entries: Sequence[Mapping[str, Any]]) -> None:
         "".join(json.dumps(entry, sort_keys=True) + "\n" for entry in entries),
         encoding="utf-8",
     )
+
+
+def record_truth(path: Path, entry_id: str, label: str, *, reason: str) -> None:
+    """Record one ground-truth judgement for one entry, and write immediately.
+
+    A way in that is not a terminal. The interactive loop reads single keystrokes,
+    which suits a person sitting at a TTY and suits nothing else; ground truth for
+    the contested findings is established by reading code carefully rather than by
+    pressing keys quickly.
+
+    Ground truth goes in `label` rather than under a condition, because it is
+    condition-independent: it is established from whatever it takes to answer, not
+    from one of the two views under test. That is also why each contested finding
+    needs judging once rather than twice, which removes the contamination of
+    judging the same code a second time while remembering the first verdict.
+
+    A reason is required here even though the interactive loop does not require one
+    from a person. The loop's asymmetry rests on a person having already spent the
+    attention by looking; that argument does not carry to the contested findings,
+    which are precisely the ones a reader is most likely to challenge. A label
+    nobody can argue with individually is a label nobody can check.
+
+    Written after every judgement, not at the end, for the reason the loop does the
+    same: work that is lost is work done twice.
+    """
+    if not reason.strip():
+        raise ValueError("ground truth needs a reason; these are the contested findings")
+
+    entries = [
+        json.loads(line)
+        for line in path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    _write(path, apply_label(entries, entry_id, label, reason=reason, by="human"))
 
 
 def run(path: Path) -> int:

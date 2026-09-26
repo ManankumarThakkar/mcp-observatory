@@ -38,6 +38,7 @@ class UnicodeConcealRule:
     # Every language. A codepoint scan needs no parser, which is why this
     # is the one rule whose coverage is the whole corpus.
     languages: tuple[str, ...] = ("*",)
+    needs_enclosing_function = False
     description = (
         "Source contains codepoints that are invisible to a human reader "
         "but are read normally by a language model: tag characters, "

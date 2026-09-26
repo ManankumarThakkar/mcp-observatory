@@ -141,6 +141,7 @@ class PathTraversalRule:
     # TypeScript and JavaScript, which the tsx grammar reads as one
     # family. The gate below uses this rather than a second copy of it.
     languages: tuple[str, ...] = ("typescript", "tsx")
+    needs_enclosing_function = True
     description = (
         "A parameter of a registered tool handler reaches a file operation "
         "without anything proving the path stayed inside its intended "

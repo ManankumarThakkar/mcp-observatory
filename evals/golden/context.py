@@ -5,9 +5,12 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from tree_sitter import Node
+
 from analyzer.fetcher.clone import CloneTooLarge, FetchError
 from analyzer.models import Finding
 from analyzer.orchestrator import UNREACHABLE_ERRORS, CloneFn, ScanFn
+from analyzer.parsing.trees import parse_source
 from analyzer.scanner import ScanReport
 
 # Exactly the failures that mean "this repository cannot be read", and nothing
@@ -31,6 +34,22 @@ CONTEXT_LINES = 12
 
 
 @dataclass(frozen=True)
+class EnclosingContext:
+    """A function's source and where the flagged line sits inside it.
+
+    The offset travels with the text because the two are only meaningful
+    together. A function begins at a different line of the file than a window
+    centred on the same finding, so the window's offset points at unrelated
+    code inside it, and a presenter handed the text alone would either guess or
+    search for the line - and a function legitimately repeats a line, so the
+    first match can be the wrong one.
+    """
+
+    text: str
+    flagged_offset: int
+
+
+@dataclass(frozen=True)
 class CaptureResult:
     """The windows captured, and every entry that could not be.
 
@@ -40,6 +59,10 @@ class CaptureResult:
     """
 
     contexts: dict[str, str] = field(default_factory=dict)
+    # The enclosing function, where one exists. Sparse on purpose: a rule the
+    # manipulation does not apply to has no entry rather than a duplicate of
+    # the window, which would imply an experiment that was not run on it.
+    functions: dict[str, EnclosingContext] = field(default_factory=dict)
     dropped: dict[str, str] = field(default_factory=dict)
 
 
@@ -73,6 +96,167 @@ def capture_context(source: str, line: int, *, window: int = CONTEXT_LINES) -> s
     start = max(0, line - window - 1)
     end = min(len(lines), line + window)
     return "\n".join(lines[start:end])
+
+
+# Node types that count as "the function this finding lives in". Arrow
+# functions and method definitions are included because an MCP tool handler is
+# usually one or the other.
+FUNCTION_NODES = frozenset(
+    {
+        "function_declaration",
+        "function_expression",
+        "generator_function_declaration",
+        "arrow_function",
+        "method_definition",
+    }
+)
+
+# A function larger than this is not a judgement aid, it is a wall. Falls back
+# to the line window, which at least centres on the finding.
+MAX_FUNCTION_CHARS = 12_000
+
+def capture_for_judgement(
+    source: str, line: int, *, suffix: str, enclosing: bool
+) -> str | None:
+    """The context a reader needs to judge one finding.
+
+    Two shapes, because two kinds of rule are judged differently.
+
+    A taint rule - does a value an assistant supplies reach this sink? - cannot
+    be judged from the sink alone. Measured while labelling: a third of
+    SHELL-EXEC-UNSAFE entries were undecidable from twelve lines either side,
+    and every one failed identically, with the sink visible and the origin of
+    the interpolated value outside the window. The enclosing function is the
+    smallest unit that contains both.
+
+    Everything else is judged from the line and what surrounds it. A codepoint
+    scan may sit in no function at all, and a wildcard origin is decided by the
+    object it is declared in rather than by the call stack above it.
+
+    Twelve lines was measured for probability spread on a decision model, which
+    is a different requirement from decidability by a reader. This is the second
+    requirement, measured separately.
+    """
+    if not enclosing:
+        return capture_context(source, line)
+
+    parsed = parse_source(source, suffix)
+    if parsed is None:
+        return capture_context(source, line)
+
+    node = _enclosing_function(parsed.tree.root_node, line, source=source)
+    if node is None:
+        # Top-level code has no enclosing function, and dropping the entry
+        # would silently shrink the sample rather than judge it.
+        return capture_context(source, line)
+
+    text = parsed.text(node)
+    if len(text) > MAX_FUNCTION_CHARS:
+        return capture_context(source, line)
+    return text
+
+
+def both_contexts(
+    source: str, line: int, *, suffix: str
+) -> tuple[str | None, EnclosingContext | None]:
+    """The same finding under both judgement conditions.
+
+    Captured together from one clone at one commit. Capturing them in separate
+    passes would let the repository move between them, which would confound the
+    condition being tested with the code being judged - and the repositories in
+    this corpus move daily.
+
+    The second is None where no enclosing function exists, which is the honest
+    representation of a rule the manipulation does not apply to: a document has
+    no function, and carrying a duplicate of the window would imply an
+    experiment that was not run on it.
+    """
+    narrow = capture_context(source, line)
+
+    parsed = parse_source(source, suffix)
+    if parsed is None:
+        return narrow, None
+    node = _enclosing_function(parsed.tree.root_node, line, source=source)
+    if node is None:
+        return narrow, None
+    text = parsed.text(node)
+    if len(text) > MAX_FUNCTION_CHARS:
+        return narrow, None
+
+    # Derived from the node's own start row rather than by searching the text
+    # for the line, which would pick the first of several identical lines.
+    offset = line - (node.start_point[0] + 1)
+    return narrow, EnclosingContext(text=text, flagged_offset=offset)
+
+
+def _enclosing_function(root: Node, line: int, *, source: str) -> Node | None:
+    """The smallest function node that encloses a one-indexed line.
+
+    "Encloses" rather than "overlaps", and the distinction is the whole
+    function. A finding carries a line but no column, so every function node
+    touching that line is a candidate, and taking the smallest then prefers a
+    subexpression of the line over the scope that contains it. Measured on
+    captured data: an inline `.catch(() => null)` beside a path call made ten
+    characters of unrelated code the "enclosing function" for that finding, and
+    forty-five of a hundred and seventeen captured functions came out smaller
+    than the line window this way. Each would have reached a labeller as the
+    finding's scope, producing an undecidable entry that says nothing about the
+    code.
+
+    So a candidate must begin at or before the flagged line's first
+    non-whitespace character. A function that opens partway along the line is a
+    fragment of it, and cannot be the scope the line sits in.
+
+    Only the start is checked, deliberately. Every failure observed in captured
+    data was a function opening mid-line; requiring it to also reach the line's
+    last character instead rejected a genuine one-line handler, because the
+    trailing comma in `async (args) => read(args.p),` belongs to the call around
+    it rather than to the handler. Guarding a shape that has not appeared, at the
+    cost of one that has, is the wrong trade. One gap remains in principle: a
+    finding in the tail of a line that opens with a short unrelated function.
+    Rather than assert it does not occur, the capture reports any function it
+    returns that is a small fraction of its window, so that shape surfaces as a
+    number instead of as a quietly undecidable entry.
+
+    The cost is a signature line. In `server.tool("x", async (a) => {` the
+    handler starts mid-line, so a finding on that line rejects it and falls back
+    to the function above or to the window. That is deliberate. The failure mode
+    becomes too much context rather than the wrong context, and only one of
+    those quietly corrupts a judgement.
+    """
+    lines = source.splitlines()
+    if not (1 <= line <= len(lines)):
+        return None
+    text = lines[line - 1]
+    first = len(text) - len(text.lstrip())
+
+    found: Node | None = None
+    stack = [root]
+    while stack:
+        current = stack.pop()
+        starts, ends = current.start_point[0] + 1, current.end_point[0] + 1
+        if not (starts <= line <= ends):
+            continue
+        # Smallest wins among candidates that genuinely enclose the line: a
+        # handler inside a factory is the useful unit.
+        if (
+            current.type in FUNCTION_NODES
+            and _opens_at_or_before(current, line, first=first)
+            and (
+                found is None
+                or (current.end_byte - current.start_byte)
+                < (found.end_byte - found.start_byte)
+            )
+        ):
+            found = current
+        stack.extend(current.named_children)
+    return found
+
+
+def _opens_at_or_before(node: Node, line: int, *, first: int) -> bool:
+    """Whether a node begins at or before the flagged line's first code character."""
+    start_row, start_col = node.start_point
+    return start_row + 1 < line or (start_row + 1 == line and start_col <= first)
 
 
 def capture_for_findings(
@@ -159,9 +343,20 @@ def _capture_from(
             result.dropped[finding.finding_id] = f"unreadable: {exc}"
             continue
 
-        captured = capture_context(source, finding.location.line)
-        if captured is None:
+        window, enclosing = both_contexts(
+            source, finding.location.line, suffix=Path(finding.location.file).suffix
+        )
+        if window is None:
             result.dropped[finding.finding_id] = "line is past the end of the file"
             continue
-        result.contexts[finding.finding_id] = captured
+        result.contexts[finding.finding_id] = window
+        # Captured wherever a function exists, including for the rules the
+        # manipulation is predicted not to help. Those are the control group:
+        # if a wider context raises an adjudicator's confidence everywhere, the
+        # dull explanation is that more text reads as more evidence, and only a
+        # set of findings predicted not to move can rule that out. Which rules
+        # are predicted to move is recorded on the rules themselves, so it stays
+        # an analysis-time distinction rather than being decided here.
+        if enclosing is not None:
+            result.functions[finding.finding_id] = enclosing
 
