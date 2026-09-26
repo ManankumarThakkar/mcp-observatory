@@ -42,7 +42,7 @@ def observe(
     *,
     condition: str,
     reason: str = "",
-    by: str = "human",
+    by: str,
 ) -> list[dict[str, Any]]:
     """Record one judgement of one entry under one condition.
 
@@ -84,7 +84,8 @@ def observe(
 def published_label(entry: Mapping[str, Any]) -> str | None:
     """The best judgement available for one entry, or None where there is none.
 
-    A human judgement settles it outright. Ground truth is condition-independent:
+    A human judgement settles it outright - a person's, recorded as such, never a
+    model's however carefully it read the code. Ground truth is condition-independent:
     it is established from whatever it takes to answer, not from one of the two
     views under test, so it outranks a disagreement between them rather than
     joining it.
@@ -106,19 +107,42 @@ def published_label(entry: Mapping[str, Any]) -> str | None:
     figure that looks decisive and is not - which is the whole premise this
     project is built on.
     """
-    human = entry.get("label")
-    if human is not None:
-        return str(human)
+    if is_human_label(entry):
+        return str(entry["label"])
 
+    labels = _model_labels(entry)
+    if len(labels) == 1:
+        return labels.pop()
+    return None
+
+
+def is_human_label(entry: Mapping[str, Any]) -> bool:
+    """Whether this entry's label is ground truth: a person's, recorded as such.
+
+    Fails closed on unknown provenance. Nineteen early labels were written before
+    the labeller was recorded at all, and all of them came from a model, so a
+    missing `labelled_by` is read as "not a person" rather than as the default.
+    """
+    return entry.get("label") is not None and entry.get("labelled_by") == "human"
+
+
+def _model_labels(entry: Mapping[str, Any]) -> set[str]:
+    """Every verdict a model has reached about this entry, whichever model.
+
+    A model-produced `label` joins the per-condition observations rather than
+    outranking them. Ground truth outranks a disagreement only because it is
+    independent of the judges being compared, and another model reading the same
+    code is not independent - it is one more judge.
+    """
     observations = entry.get("observations") or {}
     labels = {
         str(seen["label"])
         for seen in observations.values()
         if isinstance(seen, Mapping) and seen.get("label") is not None
     }
-    if len(labels) == 1:
-        return labels.pop()
-    return None
+    if entry.get("label") is not None and not is_human_label(entry):
+        labels.add(str(entry["label"]))
+    return labels
 
 
 def is_contested(entry: Mapping[str, Any]) -> bool:
@@ -130,15 +154,9 @@ def is_contested(entry: Mapping[str, Any]) -> bool:
     Counting them together would hide measured instability inside ordinary
     incompleteness, which is the more flattering of the two and the less true.
     """
-    if entry.get("label") is not None:
+    if is_human_label(entry):
         return False
-    observations = entry.get("observations") or {}
-    labels = {
-        str(seen["label"])
-        for seen in observations.values()
-        if isinstance(seen, Mapping) and seen.get("label") is not None
-    }
-    return len(labels) > 1
+    return len(_model_labels(entry)) > 1
 
 
 def next_unlabelled(entries: Sequence[Mapping[str, Any]]) -> Mapping[str, Any] | None:
@@ -170,9 +188,14 @@ def apply_label(
     label: str | None,
     *,
     reason: str = "",
-    by: str = "human",
+    by: str,
 ) -> list[dict[str, Any]]:
     """Return the entries with one judgement recorded, or taken back.
+
+    `by` has no default, deliberately. It used to default to "human", and that is
+    how forty-eight labels produced by Claude - a model - came to be recorded and
+    reported as human ground truth on 2026-09-26. A labeller that must be named
+    cannot be mis-named by omission.
 
     A model must give a reason; a person need not. The asymmetry is deliberate.
     A person pressing one key has already spent the attention that makes the
@@ -266,7 +289,7 @@ def _write(path: Path, entries: Sequence[Mapping[str, Any]]) -> None:
     )
 
 
-def record_truth(path: Path, entry_id: str, label: str, *, reason: str) -> None:
+def record_truth(path: Path, entry_id: str, label: str, *, reason: str, by: str) -> None:
     """Record one ground-truth judgement for one entry, and write immediately.
 
     A way in that is not a terminal. The interactive loop reads single keystrokes,
@@ -297,7 +320,7 @@ def record_truth(path: Path, entry_id: str, label: str, *, reason: str) -> None:
         for line in path.read_text(encoding="utf-8").splitlines()
         if line.strip()
     ]
-    _write(path, apply_label(entries, entry_id, label, reason=reason, by="human"))
+    _write(path, apply_label(entries, entry_id, label, reason=reason, by=by))
 
 
 def run(path: Path) -> int:
@@ -325,11 +348,13 @@ def run(path: Path) -> int:
         if answer == "b":
             previous = last_labelled(entries)
             if previous is not None:
-                entries = apply_label(entries, str(previous["entry_id"]), None)
+                entries = apply_label(entries, str(previous["entry_id"]), None, by="human")
                 _write(path, entries)
             continue
         if answer in KEYS:
-            entries = apply_label(entries, str(entry["entry_id"]), KEYS[answer])
+            # A person pressing a key at a terminal: the one caller for which
+            # "human" is simply true.
+            entries = apply_label(entries, str(entry["entry_id"]), KEYS[answer], by="human")
             _write(path, entries)
 
 

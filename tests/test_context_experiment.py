@@ -565,14 +565,25 @@ def test_an_entry_with_no_probability_gains_no_observation() -> None:
     assert not (record_verdicts(entries)[0].get("observations") or {})
 
 
-def _truthed(entry_id: str, window: float, function: float, label: str) -> dict[str, Any]:
-    return {
+def _truthed(
+    entry_id: str,
+    window: float,
+    function: float,
+    label: str,
+    labelled_by: str | None = "human",
+) -> dict[str, Any]:
+    """A settled entry. Provenance is part of the fixture because scoring now
+    refuses to guess it; `None` builds a legacy entry with no labeller recorded."""
+    entry: dict[str, Any] = {
         "entry_id": entry_id,
         "rule_id": "SHELL-EXEC-UNSAFE",
         "server_id": f"s/{entry_id}",
         "label": label,
         "probabilities": {"window": window, "function": function},
     }
+    if labelled_by is not None:
+        entry["labelled_by"] = labelled_by
+    return entry
 
 
 def test_each_context_is_scored_against_ground_truth_where_they_disagree() -> None:
@@ -594,7 +605,7 @@ def test_each_context_is_scored_against_ground_truth_where_they_disagree() -> No
         _truthed("d", window=0.90, function=0.90, label="true_positive"),
     ]
 
-    result = truth_agreement(entries)
+    result = truth_agreement(entries, labelled_by="human")
 
     assert result.n == 3
     assert result.function_correct == 3
@@ -620,7 +631,7 @@ def test_the_direction_of_each_context_s_errors_is_reported() -> None:
         _truthed("c", window=0.20, function=0.80, label="true_positive"),
     ]
 
-    result = truth_agreement(entries)
+    result = truth_agreement(entries, labelled_by="human")
 
     assert result.window_credulous == 2, "called a false positive real"
     assert result.window_missed == 1, "rejected a real finding"
@@ -636,7 +647,7 @@ def test_an_unsure_label_is_excluded_from_the_scoring() -> None:
         _truthed("b", window=0.80, function=0.20, label="unsure"),
     ]
 
-    assert truth_agreement(entries).n == 1
+    assert truth_agreement(entries, labelled_by="human").n == 1
 
 
 def test_the_agreement_result_carries_its_own_significance_and_spread() -> None:
@@ -651,7 +662,7 @@ def test_the_agreement_result_carries_its_own_significance_and_spread() -> None:
         for n in range(10)
     ]
 
-    result = truth_agreement(entries)
+    result = truth_agreement(entries, labelled_by="human")
 
     assert result.p_value < 0.01
     assert result.servers == 10
@@ -671,7 +682,7 @@ def test_the_error_asymmetry_carries_its_own_significance() -> None:
         for n in range(16)
     ] + [_truthed("real", window=0.20, function=0.80, label="true_positive")]
 
-    result = truth_agreement(entries)
+    result = truth_agreement(entries, labelled_by="human")
 
     assert (result.window_credulous, result.window_missed) == (16, 1)
     assert result.window_credulity_p_value < 0.001
@@ -687,4 +698,39 @@ def test_a_balanced_error_split_reports_no_asymmetry() -> None:
         _truthed("b", window=0.20, function=0.80, label="true_positive"),
     ]
 
-    assert truth_agreement(entries).window_credulity_p_value == 1.0
+    assert truth_agreement(entries, labelled_by="human").window_credulity_p_value == 1.0
+
+
+def test_agreement_is_scored_against_a_named_labeller_only() -> None:
+    """The report called Claude's labels "ground truth" and said a human had
+    settled them. Neither was true. Scoring has to name whose labels it is scored
+    against, so a comparison with a model's reading can never be printed as a
+    comparison with the truth.
+    """
+    from evals.harness.experiment import truth_agreement
+
+    entries = [
+        {**_truthed("a", window=0.80, function=0.20, label="false_positive"), "labelled_by": "model"},
+        {**_truthed("b", window=0.80, function=0.20, label="false_positive"), "labelled_by": "human"},
+    ]
+
+    assert truth_agreement(entries, labelled_by="human").n == 1
+    assert truth_agreement(entries, labelled_by="model").n == 1
+
+
+def test_agreement_refuses_to_guess_whose_labels_to_use() -> None:
+    from evals.harness.experiment import truth_agreement
+
+    with pytest.raises(TypeError):
+        truth_agreement([])  # type: ignore[call-arg]
+
+
+def test_a_label_with_no_labeller_is_scored_as_nobody_s() -> None:
+    """Fail closed: an unattributed label is neither a person's nor admissible as
+    a named model's."""
+    from evals.harness.experiment import truth_agreement
+
+    entries = [_truthed("a", window=0.80, function=0.20, label="false_positive", labelled_by=None)]
+
+    assert truth_agreement(entries, labelled_by="human").n == 0
+    assert truth_agreement(entries, labelled_by="model").n == 0

@@ -40,7 +40,7 @@ def test_a_fully_labelled_set_has_nothing_left_to_ask() -> None:
 
 
 def test_applying_a_label_leaves_every_other_entry_alone() -> None:
-    updated = apply_label(ENTRIES, "g-0002", "false_positive")
+    updated = apply_label(ENTRIES, "g-0002", "false_positive", by="human")
 
     assert updated[1]["label"] == "false_positive"
     assert updated[0]["label"] == "true_positive"
@@ -53,7 +53,7 @@ def test_an_unknown_label_is_refused() -> None:
     worse for a reason that has nothing to do with any of them.
     """
     with pytest.raises(ValueError, match="label"):
-        apply_label(ENTRIES, "g-0002", "probably")
+        apply_label(ENTRIES, "g-0002", "probably", by="human")
 
 
 def test_unsure_is_a_first_class_answer() -> None:
@@ -62,14 +62,14 @@ def test_unsure_is_a_first_class_answer() -> None:
     truth, and every arm is then scored against a coin flip.
     """
     assert "unsure" in LABELS
-    assert apply_label(ENTRIES, "g-0002", "unsure")[1]["label"] == "unsure"
+    assert apply_label(ENTRIES, "g-0002", "unsure", by="human")[1]["label"] == "unsure"
 
 
 def test_labelling_an_entry_that_does_not_exist_is_refused() -> None:
     """Silently doing nothing looks identical to success, and the entry would
     simply be asked again next session."""
     with pytest.raises(KeyError, match="g-9999"):
-        apply_label(ENTRIES, "g-9999", "true_positive")
+        apply_label(ENTRIES, "g-9999", "true_positive", by="human")
 
 
 def test_the_last_judgement_can_be_found_again_to_undo_it() -> None:
@@ -329,7 +329,7 @@ def test_a_human_judgement_settles_a_contested_finding() -> None:
     disagreement between them rather than joining it."""
     entries = observe(ENTRIES, "g-0002", "true_positive", condition="window", reason="x", by="model")
     entries = observe(entries, "g-0002", "false_positive", condition="function", reason="y", by="model")
-    entries = apply_label(entries, "g-0002", "true_positive", reason="read the caller")
+    entries = apply_label(entries, "g-0002", "true_positive", reason="read the caller", by="human")
 
     assert published_label(entries[1]) == "true_positive"
 
@@ -364,7 +364,9 @@ def test_ground_truth_is_recorded_straight_to_the_file(tmp_path: Path) -> None:
         encoding="utf-8",
     )
 
-    record_truth(path, "g-0002", "true_positive", reason="the caller passes tool input")
+    record_truth(
+        path, "g-0002", "true_positive", reason="the caller passes tool input", by="human"
+    )
 
     written = [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
     assert written[1]["label"] == "true_positive"
@@ -388,7 +390,7 @@ def test_ground_truth_requires_a_reason(tmp_path: Path) -> None:
     )
 
     with pytest.raises(ValueError, match="reason"):
-        record_truth(path, "g-0001", "true_positive", reason="   ")
+        record_truth(path, "g-0001", "true_positive", reason="   ", by="human")
 
 
 def test_recording_ground_truth_refuses_an_unknown_entry(tmp_path: Path) -> None:
@@ -401,4 +403,60 @@ def test_recording_ground_truth_refuses_an_unknown_entry(tmp_path: Path) -> None
     )
 
     with pytest.raises(KeyError):
-        record_truth(path, "g-9999", "true_positive", reason="x")
+        record_truth(path, "g-9999", "true_positive", reason="x", by="human")
+
+
+# --- provenance: who made a judgement is never assumed -----------------------
+
+def test_recording_a_judgement_requires_naming_who_made_it() -> None:
+    """The default was "human", and that default is how model labels became
+    ground truth.
+
+    On 2026-09-26 forty-eight golden-set labels were produced by Claude, a model,
+    and twenty-nine of them were recorded as human because the helper that wrote
+    them supplied "human" whenever no labeller was named. Nothing downstream could
+    tell the difference, and a research result was reported as resting on human
+    ground truth when it rested on one model grading another. A labeller that must
+    be named cannot be mis-named by omission.
+    """
+    with pytest.raises(TypeError):
+        apply_label(ENTRIES, "g-0002", "false_positive")  # type: ignore[call-arg]
+
+
+def test_recording_ground_truth_requires_naming_who_made_it(tmp_path: Path) -> None:
+    path = tmp_path / "entries.jsonl"
+    path.write_text(
+        json.dumps({"entry_id": "g-0001", "rule_id": "SHELL-EXEC-UNSAFE", "label": None}) + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(TypeError):
+        record_truth(path, "g-0001", "true_positive", reason="x")  # type: ignore[call-arg]
+
+
+def test_a_model_label_does_not_settle_a_contested_finding() -> None:
+    """Ground truth outranks a disagreement between the two contexts only because
+    it is independent of them. A label from another model is not independent: it
+    is a third model reading the same code. So it is reported beside the others,
+    and the finding stays contested until a person settles it.
+    """
+    entries = observe(ENTRIES, "g-0002", "true_positive", condition="window", reason="x", by="model")
+    entries = observe(entries, "g-0002", "false_positive", condition="function", reason="y", by="model")
+    entries = apply_label(entries, "g-0002", "false_positive", reason="read it", by="model")
+
+    assert is_contested(entries[1])
+    assert published_label(entries[1]) is None
+
+
+def test_a_label_with_no_recorded_labeller_is_not_treated_as_human() -> None:
+    """Fail closed on unknown provenance. Nineteen early labels were written before
+    the labeller was recorded at all, and every one of them was a model's. Reading a
+    missing field as "human" would repeat the original mistake on older data.
+    """
+    entries = observe(ENTRIES, "g-0002", "true_positive", condition="window", reason="x", by="model")
+    entries = observe(entries, "g-0002", "false_positive", condition="function", reason="y", by="model")
+    legacy = {**entries[1], "label": "false_positive"}
+    legacy.pop("labelled_by", None)
+
+    assert is_contested(legacy)
+    assert published_label(legacy) is None
