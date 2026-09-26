@@ -303,6 +303,7 @@ def publish_from_history(
     disclosure_records: Mapping[str, DisclosureRecord],
     now: datetime,
     tool_version: str,
+    destination: Path | None = None,
 ) -> PublishResult:
     """Publish what the gate allows, from the history alone.
 
@@ -320,6 +321,15 @@ def publish_from_history(
     A missing history raises rather than publishing nothing. Writing an empty
     `data/` would replace a good publication with silence and read as an
     ecosystem that fixed itself overnight.
+
+    `destination` separates where the result is written from where the current
+    publication is read, and exists because the two differ for a dry run. That
+    distinction was missing and it broke the dry run completely: it pointed the
+    destination at a throwaway directory so that the report would come from the
+    real code path rather than a second implementation, which is right, but
+    coverage is read from the same directory and a throwaway one has none. Every
+    dry run therefore raised. It defaults to `data_dir`, so an ordinary
+    publication still names one directory.
     """
     history_path = cache_dir / HISTORY_FILE
     if not history_path.exists():
@@ -327,7 +337,9 @@ def publish_from_history(
             f"no history at {history_path}; there is nothing to publish without a scan"
         )
 
+    # Read from the current publication, written to wherever the caller says.
     summary_path = data_dir / SUMMARY_FILE
+    write_dir = destination if destination is not None else data_dir
     coverage = _previous_coverage(summary_path)
     if coverage is None:
         # The history records findings, not how many servers were scanned: 306
@@ -344,23 +356,36 @@ def publish_from_history(
     merged = load_previous(history_path)
     published, counts = _publish(
         merged,
-        data_dir=data_dir,
+        data_dir=write_dir,
         disclosure_records=disclosure_records,
         now=now,
         tool_version=tool_version,
     )
-    _stamp_publication(summary_path, counts, utc_stamp(now), tool_version, merged)
+    _stamp_publication(
+        summary_path,
+        write_dir / SUMMARY_FILE,
+        counts,
+        utc_stamp(now),
+        tool_version,
+        merged,
+    )
     return PublishResult(published=published, withheld=counts["withheld"] + counts["opted_out"])
 
 
 def _stamp_publication(
-    path: Path,
+    source: Path,
+    target: Path,
     counts: Mapping[str, int],
     stamp: str,
     tool_version: str,
     merged: Sequence[Mapping[str, Any]],
 ) -> None:
     """Update the disclosure counts and date the publication, keeping the scan.
+
+    Read from `source` and written to `target`, which are the same path for an
+    ordinary publication and differ for a dry run. The scan block being carried
+    across is the reason the two cannot simply be one: it exists only in the
+    current publication.
 
     The coverage figures describe the scan that produced them, and nothing was
     scanned here. Overwriting `generated_at` would date a 1,642-server scan to
@@ -370,9 +395,9 @@ def _stamp_publication(
     both.
     """
     payload: dict[str, Any] = {}
-    if path.exists():
+    if source.exists():
         try:
-            payload = json.loads(path.read_text(encoding="utf-8"))
+            payload = json.loads(source.read_text(encoding="utf-8"))
         except json.JSONDecodeError:
             payload = {}
 
@@ -392,8 +417,8 @@ def _stamp_publication(
     # generated_at is deliberately never defaulted to now. It describes the
     # scan, and republication scans nothing; the caller has already refused to
     # proceed without a prior summary, so it is always present here.
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
 def _write_summary(

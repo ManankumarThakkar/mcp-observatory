@@ -3,19 +3,19 @@
   "disclosure": {
     "disclosed": 0,
     "opted_out": 0,
-    "published": 323,
-    "withheld": 973
+    "published": 324,
+    "withheld": 977
   },
   "failed": 0,
   "found_by_rule": {
     "PATH-TRAVERSAL": 165,
-    "SCOPE-OVERBROAD": 323,
+    "SCOPE-OVERBROAD": 324,
     "SHELL-EXEC-UNSAFE": 128,
-    "TOOL-DESC-INJECTION": 600,
-    "UNICODE-CONCEAL": 80
+    "TOOL-DESC-INJECTION": 602,
+    "UNICODE-CONCEAL": 82
   },
-  "generated_at": "2026-09-25T08:18:46Z",
-  "published_at": "2026-09-25T15:11:01Z",
+  "generated_at": "2026-09-25T15:36:42Z",
+  "published_at": "2026-09-26T07:37:30Z",
   "sample_seed": 20260923,
   "sampled": 2000,
   "scanned": 1643,

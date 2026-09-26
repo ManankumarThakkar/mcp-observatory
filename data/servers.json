@@ -156,6 +156,10 @@
     "server_id": "io.github.BrightbeamAI/chap"
   },
   {
+    "repo_url": "https://github.com/DiffCI/DiffCI.com",
+    "server_id": "io.github.DiffCI/diffci"
+  },
+  {
     "repo_url": "https://github.com/DmitriyGolub/threejs-devtools-mcp",
     "server_id": "io.github.DmitriyGolub/threejs-devtools"
   },

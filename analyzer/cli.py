@@ -430,7 +430,12 @@ def _publish_command(args: argparse.Namespace) -> int:
             # implementation that could disagree with it.
             result = publish_from_history(
                 cache_dir=cache_dir,
-                data_dir=Path(scratch),
+                # Read the current publication, write to the throwaway. Pointing
+                # both at the scratch directory is what broke this: coverage is
+                # read from the data directory and a fresh one has none, so every
+                # dry run raised instead of reporting.
+                data_dir=data_dir,
+                destination=Path(scratch),
                 disclosure_records={},
                 now=datetime.now(UTC),
                 tool_version=__version__,
