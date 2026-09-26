@@ -515,11 +515,18 @@ nothing ever checked that the server was local. Measured on the golden set:
 | `SCOPE-OVERBROAD` entries with captured context | 60 |
 | That look like deployed HTTP servers | 36 |
 | That look local only | 5 |
-| Hand-labelled, false positive | 9 |
-| Hand-labelled, true positive | 1 |
+| Labelled by Claude (a model), false positive | 9 |
+| Labelled by Claude (a model), true positive | 1 |
 
-Every one of the five findings where two annotation contexts disagreed was a
-false positive, and all five for this single reason.
+Every one of the five findings where two annotation contexts disagreed was
+labelled a false positive, and all five for this single reason.
+
+**Correction, 2026-09-26.** This table first said "hand-labelled". Those ten labels
+were produced by Claude, a model, not by a person, and no person has yet labelled
+any of them. The decision does not rest on them: the argument about credentials
+holds by inspection, and the change was verified by rescanning ten real servers
+below. But the 9:1 figure is one model's reading, not a measured precision, and
+must not be quoted as one.
 
 **Why a wildcard origin is not overbroad on a deployed server.** It cannot be
 combined with `Access-Control-Allow-Credentials`, so a browser never sends
