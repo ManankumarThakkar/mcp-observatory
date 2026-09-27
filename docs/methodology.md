@@ -202,8 +202,8 @@ See `DECISIONS.md` D13.
 The first time anything in this project was scored rather than asserted.
 
 **Method.** 43 real findings from 10 real servers, produced by a scan of a
-random 150-server sample. Each labelled by hand by reading the surrounding
-code, against a rule fixed before any scoring: *exploitable = an
+random 150-server sample. Each labelled by reading the surrounding code -
+by Claude, a model, not by a person - against a rule fixed before any scoring: *exploitable = an
 assistant-supplied argument reaches the sink, and nothing constrains where it
 can go.*
 
@@ -230,9 +230,12 @@ than a better one that hides them:
 1. **The sample is concentrated.** 22 of the 43 findings come from a single
    repository, so the effective sample is nearer ten servers than forty-three
    findings.
-2. **The labels are not independent.** The same project wrote the rules and the
-   labels. That is precisely the weakness `DECISIONS.md` D7 criticises in
-   accuracy figures published elsewhere, and naming it here does not excuse it.
+2. **The labels are not independent, and they are not human.** Claude wrote the
+   rules and then labelled the findings they produced. That is precisely the
+   weakness `DECISIONS.md` D7 criticises in accuracy figures published elsewhere,
+   made worse because the labeller is itself a model, and naming it here does not
+   excuse it. This section first said the labels were made "by hand"; that was
+   wrong, and was corrected on 2026-09-26.
 3. **The rubric is a choice.** A different and equally defensible rule — that a
    file-reading tool reading any file is doing its job — would move many labels.
 

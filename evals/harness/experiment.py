@@ -585,8 +585,17 @@ class TruthAgreement:
     function_credulity_p_value: float
 
 
-def truth_agreement(entries: Sequence[Mapping[str, Any]]) -> TruthAgreement:
-    """Score both contexts against ground truth where their verdicts disagree.
+def truth_agreement(
+    entries: Sequence[Mapping[str, Any]], *, labelled_by: str
+) -> TruthAgreement:
+    """Score both contexts against one named labeller where their verdicts disagree.
+
+    `labelled_by` is required and has no default. The first version scored against
+    whatever sat in `label`, and the report printed the result as agreement with
+    ground truth "settled by a human". Every one of those labels had been produced
+    by Claude, a model. Naming the labeller makes a comparison with a model's
+    reading impossible to print as a comparison with the truth. An entry with no
+    recorded labeller belongs to nobody and is excluded.
 
     Restricted to the disagreement set on purpose. Those are the only findings
     where the annotation choice changes an answer, and they are where the hand
@@ -607,6 +616,7 @@ def truth_agreement(entries: Sequence[Mapping[str, Any]]) -> TruthAgreement:
         (entry, verdict(float(window)), verdict(float(function)), str(entry["label"]))
         for entry, window, function in _paired_probabilities(entries)
         if entry.get("label") in ("true_positive", "false_positive")
+        and entry.get("labelled_by") == labelled_by
     ]
     disagreed = [row for row in rows if row[1] != row[2]]
 

@@ -13,6 +13,7 @@ from analyzer.triage.jev import JevAdjudicator, post_json
 from evals.golden.label import CONDITIONS, is_contested, published_label
 from evals.harness.experiment import (
     PairedEffect,
+    TruthAgreement,
     eligible,
     flip_sensitivity,
     paired_decisiveness,
@@ -125,6 +126,42 @@ def _write(path: Path, entries: Sequence[dict[str, Any]]) -> None:
     )
 
 
+def _report_agreement(agreement: TruthAgreement, labeller: str, meaning: str) -> None:
+    """One labeller's comparison, headed with what that labeller's word is worth."""
+    print(f"\nAgainst {labeller} labels ({meaning}):")
+    if not agreement.n:
+        print(
+            f"  none yet. No disagreement has been settled by a {labeller} labeller, "
+            "so there is nothing to score against."
+        )
+        return
+    print(
+        f"  on the {agreement.n} findings where the two contexts disagree "
+        f"({agreement.servers} servers)"
+    )
+    print(
+        f"  enclosing function agrees {agreement.function_correct}/{agreement.n}"
+        f"   narrow window agrees {agreement.window_correct}/{agreement.n}"
+        f"   p = {agreement.p_value:.4f}"
+    )
+    print(f"  labelled vulnerable: {agreement.really_vulnerable} of {agreement.n}")
+    print(
+        f"  window disagreements:   says real where label says not "
+        f"{agreement.window_credulous}, the reverse {agreement.window_missed}"
+        f"   (asymmetry p = {agreement.window_credulity_p_value:.5f})"
+    )
+    print(
+        f"  function disagreements: says real where label says not "
+        f"{agreement.function_credulous}, the reverse {agreement.function_missed}"
+        f"   (asymmetry p = {agreement.function_credulity_p_value:.5f})"
+    )
+    print(
+        "  Nothing here estimates overall precision - the set is selected by "
+        "disagreement. Findings from one function or server are not independent, "
+        "so these p-values overstate the evidence until they are clustered."
+    )
+
+
 def _report(label: str, effect: PairedEffect) -> None:
     print(f"\n{label}  (n={effect.n} paired)")
     print(f"  median decisiveness, window   {effect.median_window:.3f}")
@@ -212,39 +249,16 @@ def main(argv: Sequence[str] | None = None) -> int:
     # Which context was right, where the choice changed the answer. Decisiveness
     # cannot answer this: a judge can move from confidently wrong to confidently
     # right without its confidence changing.
-    agreement = truth_agreement(entries)
-    if agreement.n:
-        print(
-            f"\nAgainst ground truth, on the {agreement.n} findings where the two "
-            f"contexts disagree and a human has settled it "
-            f"({agreement.servers} servers):"
-        )
-        print(
-            f"  enclosing function correct {agreement.function_correct}/{agreement.n}"
-            f"   narrow window correct {agreement.window_correct}/{agreement.n}"
-            f"   p = {agreement.p_value:.4f}"
-        )
-        print(
-            f"  really vulnerable: {agreement.really_vulnerable} of {agreement.n} - "
-            "a disagreement is mostly a sign the finding is not real"
-        )
-        print(
-            f"  window errors:   accepted {agreement.window_credulous} unreal as real, "
-            f"rejected {agreement.window_missed} real"
-            f"   (asymmetry p = {agreement.window_credulity_p_value:.5f})"
-        )
-        print(
-            f"  function errors: accepted {agreement.function_credulous} unreal as real, "
-            f"rejected {agreement.function_missed} real"
-            f"   (asymmetry p = {agreement.function_credulity_p_value:.5f})"
-        )
-        print(
-            "  The error direction, not the accuracy gap, is the result: a narrow "
-            "window hides the guard rather than the vulnerability, so it errs by "
-            "believing findings that are not real. That biases a precision measured "
-            "under it upward, which is the reverse of the original hypothesis. "
-            "Nothing here estimates overall precision - the set is selected."
-        )
+    #
+    # Reported once per labeller and never merged. A person's labels are ground
+    # truth; a model's are one more reading of the same code. The first version of
+    # this report printed Claude's labels as "ground truth ... settled by a human",
+    # which was false on both counts.
+    for labeller, meaning in (
+        ("human", "ground truth from a person"),
+        ("model", "a model's reading, NOT ground truth - one model grading another"),
+    ):
+        _report_agreement(truth_agreement(entries, labelled_by=labeller), labeller, meaning)
     return 0
 
 

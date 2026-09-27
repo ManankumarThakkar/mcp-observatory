@@ -122,7 +122,7 @@ trial run.
 ## 📊 What has actually been measured
 
 A pilot on 2026-09-22: **43 real findings from 10 real servers**, each labelled
-by hand by reading the code.
+by reading the code - by Claude, a model, not by a person.
 
 | | precision | recall |
 | --- | ---: | ---: |
@@ -135,8 +135,11 @@ you cannot reproduce it from this repository.** Three limits, the third of which
 is the worst:
 
 1. The sample is concentrated: 22 of 43 findings come from one repository.
-2. The same project wrote both the rules and the labels, which is exactly the
-   weakness we criticise in figures published elsewhere.
+2. **The labels are a model's, not a person's.** Claude wrote the rules and
+   then labelled the findings they produced. That is not independent ground
+   truth: it is the weakness we criticise in figures published elsewhere, made
+   worse because the labeller is also a model. An earlier version of this page
+   said the labels were made "by hand"; that was wrong.
 3. **The 43 labels were not retained.** The pilot predates the golden-set
    machinery, and its judgements existed only in the session that made them. The
    figure is therefore indicative and unverifiable, which by this project's own
