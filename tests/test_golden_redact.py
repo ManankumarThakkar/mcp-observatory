@@ -129,7 +129,8 @@ def test_a_finding_past_its_window_is_published() -> None:
     grows as windows close rather than never shipping.
     """
     record = DisclosureRecord(
-        server_id="acme/notes-server", notified_at=NOW - timedelta(days=120)
+        server_id="acme/notes-server",
+        notified={_finding().finding_id: NOW - timedelta(days=120)},
     )
 
     entries = publish(
@@ -164,7 +165,9 @@ def test_an_opted_out_maintainer_is_honoured_even_past_the_window() -> None:
     still publication.
     """
     record = DisclosureRecord(
-        server_id="acme/notes-server", notified_at=NOW - timedelta(days=365), opted_out=True
+        server_id="acme/notes-server",
+        notified={_finding().finding_id: NOW - timedelta(days=365)},
+        opted_out=True,
     )
 
     entries = publish(

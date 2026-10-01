@@ -27,10 +27,13 @@ def _finding(severity: str = "critical", server_id: str = "owner/repo") -> Findi
     )
 
 
+FINDING_ID = _finding().finding_id
+
+
 def _record(**kwargs: object) -> DisclosureRecord:
     defaults: dict[str, object] = {
         "server_id": "owner/repo",
-        "notified_at": None,
+        "notified": {},
         "opted_out": False,
     }
     return DisclosureRecord(**{**defaults, **kwargs})  # type: ignore[arg-type]
@@ -58,13 +61,13 @@ def test_a_serious_finding_nobody_has_been_told_about_is_withheld() -> None:
 
 
 def test_a_serious_finding_inside_the_window_is_withheld() -> None:
-    record = _record(notified_at=NOW - DISCLOSURE_WINDOW + timedelta(days=1))
+    record = _record(notified={FINDING_ID: NOW - DISCLOSURE_WINDOW + timedelta(days=1)})
 
     assert disclosure_state(_finding("critical"), record, now=NOW) == "withheld"
 
 
 def test_a_serious_finding_past_the_window_may_be_published() -> None:
-    record = _record(notified_at=NOW - DISCLOSURE_WINDOW - timedelta(seconds=1))
+    record = _record(notified={FINDING_ID: NOW - DISCLOSURE_WINDOW - timedelta(seconds=1)})
 
     assert disclosure_state(_finding("critical"), record, now=NOW) == "disclosed"
 
@@ -75,7 +78,7 @@ def test_the_window_boundary_is_not_a_publication() -> None:
     An off-by-one here publishes a day early, which is the one direction this
     gate must never be wrong in.
     """
-    record = _record(notified_at=NOW - DISCLOSURE_WINDOW)
+    record = _record(notified={FINDING_ID: NOW - DISCLOSURE_WINDOW})
 
     assert disclosure_state(_finding("critical"), record, now=NOW) == "withheld"
 
@@ -101,7 +104,7 @@ def test_a_server_with_no_record_at_all_is_withheld() -> None:
 
 def test_a_notification_dated_in_the_future_does_not_open_the_window() -> None:
     """Bad data must not publish. A future date means the window has not run."""
-    record = _record(notified_at=NOW + timedelta(days=365))
+    record = _record(notified={FINDING_ID: NOW + timedelta(days=365)})
 
     assert disclosure_state(_finding("critical"), record, now=NOW) == "withheld"
 
@@ -118,7 +121,7 @@ def test_a_naive_timestamp_is_refused_rather_than_compared() -> None:
     with pytest.raises(ValueError, match="timezone"):
         disclosure_state(
             _finding("critical"),
-            _record(notified_at=datetime(2026, 1, 1)),  # noqa: DTZ001
+            _record(notified={FINDING_ID: datetime(2026, 1, 1)}),  # noqa: DTZ001
             now=NOW,
         )
 
@@ -144,9 +147,13 @@ def test_only_disclosed_and_lesser_findings_reach_the_published_list() -> None:
         _finding("high", "e/unknown"),
     ]
     records = {
-        "a/withheld": _record(server_id="a/withheld", notified_at=NOW - timedelta(days=5)),
+        "a/withheld": _record(
+            server_id="a/withheld",
+            notified={findings[0].finding_id: NOW - timedelta(days=5)},
+        ),
         "b/disclosed": _record(
-            server_id="b/disclosed", notified_at=NOW - DISCLOSURE_WINDOW - timedelta(days=1)
+            server_id="b/disclosed",
+            notified={findings[1].finding_id: NOW - DISCLOSURE_WINDOW - timedelta(days=1)},
         ),
         "c/optedout": _record(server_id="c/optedout", opted_out=True),
     }
@@ -185,3 +192,29 @@ def test_publication_order_follows_the_input() -> None:
     published, _ = split_for_publication(findings, {}, now=NOW)
 
     assert [f.server_id for f in published] == ["c/one", "a/two", "b/three"]
+
+
+# --- the window belongs to the finding a notice names --------------------------
+
+def test_a_notice_opens_the_window_only_for_the_findings_it_names() -> None:
+    """Two serious findings on one server; the notice described only the first.
+
+    With one notification date per server, the second would be published when
+    the first's window closed, though its maintainer was never told about it.
+    Under the policy that is an unverified finding we chose not to report, and
+    those are never published individually.
+    """
+    named = _finding("critical")
+    unnamed = Finding(
+        server_id=named.server_id,
+        commit_sha="a" * 40,
+        rule_id="SHELL-EXEC-UNSAFE",
+        severity="critical",
+        confidence="high",
+        location=Location(file="src/run.ts", line=9),
+        evidence="exec(input.command)",
+    )
+    record = _record(notified={named.finding_id: NOW - DISCLOSURE_WINDOW - timedelta(days=1)})
+
+    assert disclosure_state(named, record, now=NOW) == "disclosed"
+    assert disclosure_state(unnamed, record, now=NOW) == "withheld"

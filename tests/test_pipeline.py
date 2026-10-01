@@ -115,7 +115,7 @@ def test_a_disclosed_finding_keeps_the_date_it_was_first_seen(tmp_path: Path) ->
     _run(tmp_path, [_record("a/one")], now=NOW)
 
     later = NOW + DISCLOSURE_WINDOW + timedelta(days=2)
-    disclosure = {"a/one": DisclosureRecord("a/one", notified_at=NOW, opted_out=False)}
+    disclosure = {"a/one": DisclosureRecord("a/one", notified={_finding("a/one").finding_id: NOW}, opted_out=False)}
     _run(tmp_path, [_record("a/one")], disclosure=disclosure, now=later)
 
     published = load_previous(tmp_path / "data" / "findings.jsonl")

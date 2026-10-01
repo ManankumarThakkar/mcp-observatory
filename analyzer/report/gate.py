@@ -1,14 +1,14 @@
 """The disclosure gate: what may be published, enforced in code."""
 
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Literal
 
 from analyzer.models import Finding
 
-# SECURITY.md: the window opens on the date the maintainer is notified, and
-# the finding may be published once it closes or once a fix ships.
+# SECURITY.md: a finding's window opens on the date its maintainer is told
+# about that finding, and it may be published once the window closes.
 DISCLOSURE_WINDOW = timedelta(days=90)
 
 # Severities that wait. Anything below this publishes immediately, because
@@ -31,13 +31,16 @@ PUBLISHABLE_STATES = frozenset({"disclosed", "published"})
 class DisclosureRecord:
     """What is known about contact with one server's maintainer.
 
-    `notified_at` is None until a notification has actually been sent. That is
-    different from a notification long ago, and the difference decides whether
-    a window has started at all.
+    `notified` maps a finding id to the date of the first notice that named
+    it. The window belongs to the finding, not the server: one date per server
+    would start the clock for every serious finding on it, including ones the
+    notice never mentioned - the unverified findings that are never published
+    individually - and ones first seen after the notice was sent. A finding
+    absent from `notified` has no window at all.
     """
 
     server_id: str
-    notified_at: datetime | None = None
+    notified: Mapping[str, datetime] = field(default_factory=dict)
     opted_out: bool = False
 
 
@@ -76,15 +79,16 @@ def disclosure_state(
     if finding.severity not in GATED_SEVERITIES:
         return "published"
 
-    if record is None or record.notified_at is None:
+    notified_at = record.notified.get(finding.finding_id) if record is not None else None
+    if notified_at is None:
         return "withheld"
 
-    _require_aware(record.notified_at, "notified_at")
+    _require_aware(notified_at, "notified_at")
 
     # Strictly greater than, so the boundary is not a publication. An
     # off-by-one here publishes a day early, which is the only direction this
     # gate must never be wrong in. A future timestamp fails the same test.
-    if now - record.notified_at > DISCLOSURE_WINDOW:
+    if now - notified_at > DISCLOSURE_WINDOW:
         return "disclosed"
     return "withheld"
 

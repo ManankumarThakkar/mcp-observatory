@@ -92,7 +92,8 @@ def test_a_closed_window_publishes_without_waiting_for_a_scan(tmp_path: Path) ->
     _history(cache / "history.jsonl", [_finding(1, "critical")])
     records = {
         "owner/repo-1": DisclosureRecord(
-            server_id="owner/repo-1", notified_at=NOW - timedelta(days=120)
+            server_id="owner/repo-1",
+            notified={_finding(1, "critical").finding_id: NOW - timedelta(days=120)},
         )
     }
 
