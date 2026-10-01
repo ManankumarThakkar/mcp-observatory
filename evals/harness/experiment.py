@@ -15,7 +15,6 @@ entries that become decidable under the wider context are counted separately,
 and their composition is the finding.
 """
 
-import math
 import statistics
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -25,6 +24,7 @@ from analyzer.rules import ALL_RULES
 from analyzer.sampling import draw
 from analyzer.triage.base import CONTEXT_FIELDS
 from evals.golden.label import CONDITIONS
+from evals.harness.stats import sign_test
 
 # The two labels that count as a decision. Anything else is the labeller saying
 # the context did not let them answer, which is the measurement here rather than
@@ -280,24 +280,8 @@ def paired_decisiveness(entries: Sequence[Mapping[str, Any]]) -> PairedEffect:
         more_decisive=more,
         less_decisive=less,
         tied=len(pairs) - more - less,
-        p_value=_sign_test(more, less),
+        p_value=sign_test(more, less),
     )
-
-
-def _sign_test(more: int, less: int) -> float:
-    """Two-sided exact sign test over the entries that moved.
-
-    Ties carry no directional information and are excluded, which is the
-    standard treatment. With nothing untied the answer is 1.0: no evidence,
-    rather than the divide-by-zero certainty this shape invites.
-    """
-    untied = more + less
-    if untied == 0:
-        return 1.0
-    smaller = min(more, less)
-    ways = sum(math.comb(untied, i) for i in range(smaller + 1))
-    tail = ways / float(2**untied)
-    return min(1.0, 2.0 * tail)
 
 
 def eligible(
@@ -637,14 +621,14 @@ def truth_agreement(
         function_missed=sum(1 for _, _, f, t in disagreed if wrong(f, t, "missed")),
         really_vulnerable=sum(1 for _, _, _, t in disagreed if t == "true_positive"),
         servers=len({str(entry.get("server_id", "")) for entry, _, _, _ in disagreed}),
-        p_value=_sign_test(function_correct, window_correct),
+        p_value=sign_test(function_correct, window_correct),
         # The asymmetry is what the claim rests on, so it is the number that gets
         # tested. The accuracy gap above is usually inconclusive at these sizes.
-        window_credulity_p_value=_sign_test(
+        window_credulity_p_value=sign_test(
             sum(1 for _, w, _, t in disagreed if wrong(w, t, "credulous")),
             sum(1 for _, w, _, t in disagreed if wrong(w, t, "missed")),
         ),
-        function_credulity_p_value=_sign_test(
+        function_credulity_p_value=sign_test(
             sum(1 for _, _, f, t in disagreed if wrong(f, t, "credulous")),
             sum(1 for _, _, f, t in disagreed if wrong(f, t, "missed")),
         ),
