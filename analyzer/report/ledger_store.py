@@ -7,18 +7,22 @@ and index are never touched, and pushed without force, so a copy that is out
 of date is rejected rather than erasing a notice recorded since.
 """
 
+import json
 import shutil
 import subprocess
 import tempfile
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 from pathlib import Path
+from typing import Any
 
 from analyzer.report.ledger import Entry, load_ledger, write_ledger
 from analyzer.report.vault import seal, unseal
 
 LEDGER_BRANCH = "disclosure-ledger"
 LEDGER_FILE = "ledger.jsonl.gpg"
+HISTORY_BRANCH = "nightly-data"
+HISTORY_FILE = "history.jsonl.gpg"
 
 # `git ls-remote --exit-code` exits 2 when the remote answered and has no such
 # branch, and with another code when it could not be reached at all.
@@ -64,16 +68,33 @@ def fetch_ledger(repo: Path, *, key: str) -> tuple[list[Entry], str | None]:
     if probe.returncode != 0:
         raise subprocess.CalledProcessError(probe.returncode, probe.args, probe.stdout, probe.stderr)
     head = probe.stdout.split()[0]
-    _git(repo, "fetch", "-q", "origin", f"refs/heads/{LEDGER_BRANCH}")
-    sealed_bytes = subprocess.run(
-        ["git", "-C", str(repo), "show", f"{head}:{LEDGER_FILE}"],
-        check=True,
-        capture_output=True,
-    ).stdout
     with _private_dir() as work:
-        (work / LEDGER_FILE).write_bytes(sealed_bytes)
-        unseal(work / LEDGER_FILE, work / "ledger.jsonl", key)
+        _unseal_from(repo, LEDGER_BRANCH, head, LEDGER_FILE, work / "ledger.jsonl", key)
         return load_ledger(work / "ledger.jsonl"), head
+
+
+def _unseal_from(repo: Path, branch: str, commit: str, name: str, target: Path, key: str) -> None:
+    """Fetch one sealed file from a remote branch and open it into `target`."""
+    _git(repo, "fetch", "-q", "origin", f"refs/heads/{branch}")
+    sealed = target.with_name(name)
+    sealed.write_bytes(
+        subprocess.run(
+            ["git", "-C", str(repo), "show", f"{commit}:{name}"], check=True, capture_output=True
+        ).stdout
+    )
+    unseal(sealed, target, key)
+
+
+def read_branch_history(repo: Path, *, key: str) -> dict[str, dict[str, Any]]:
+    """The nightly's latest sealed history, by finding id, to check notices against."""
+    with _private_dir() as work:
+        _unseal_from(repo, HISTORY_BRANCH, "FETCH_HEAD", HISTORY_FILE, work / "history.jsonl", key)
+        records = [
+            json.loads(line)
+            for line in (work / "history.jsonl").read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+    return {str(r["finding_id"]): r for r in records}
 
 
 def publish_ledger(
