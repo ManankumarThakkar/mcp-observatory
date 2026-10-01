@@ -140,6 +140,36 @@ judge, and no analysis is run, until annotation is complete.
 Any departure from this plan is reported in the paper with its reason, and analyses
 not listed here are labelled exploratory.
 
+## Clarifications made before any label existed
+
+Added 2026-10-01, with the analysis code, when no annotation file existed. They fix
+details the text above left open, and they change no hypothesis, sample or test.
+
+- **H1, one finding per server.** Where a server has several window errors, the one
+  kept is chosen by the project's hashed draw with seed 20260926, not by file order,
+  so the choice is reproducible and cannot be made to suit the result.
+- **H2, the server left out.** The server with the most disagreements in the frozen
+  snapshot, ties broken by name.
+- **H3, the accuracy gap.** On a disagreement exactly one condition matches a
+  decided human label, so the gap is reported as the number of human-decided
+  disagreements on which each condition was right. No test is run.
+- **Completeness and conflicts.** The analysis refuses to run while any queued
+  finding has no label, and while two annotators disagree on a finding that has not
+  been adjudicated. Dropping those findings instead would remove the hardest cases
+  from H1.
+- **No judge.** The analysis reads only the frozen snapshot and the labels, and
+  cannot import the code that calls a judge.
+- **The judges' stored answers.** The digest above deliberately leaves out the
+  probabilities, so a second digest over them is recorded:
+  `16aa3fdf1263e32aa2f942410958d89717ce66c34bcafaab36e36a9a75b42b40`. The
+  analysis refuses a snapshot whose answers no longer match it, a seed other than
+  20260926, a queue or control that does not follow from the snapshot, or a
+  snapshot that already holds a human label.
+- **Adjudication.** Each settled disagreement is one record holding the finding,
+  the label and the reason, and a record without a reason is refused. Only
+  findings the annotators actually disagree on can be adjudicated. Labels and
+  adjudications live in their own files; the frozen snapshot is never rewritten.
+
 ## Ethics
 
 No scanned repository is executed. Maintainers are notified only of findings a

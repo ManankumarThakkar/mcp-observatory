@@ -3,7 +3,12 @@ from typing import Any
 
 import pytest
 
-from evals.golden.study import annotation_sample, check_frozen, snapshot_digest
+from evals.golden.study import (
+    annotation_sample,
+    check_frozen,
+    probability_digest,
+    snapshot_digest,
+)
 
 
 def _entry(entry_id: str, window: float = 0.8, function: float = 0.8, **extra: Any) -> dict[str, Any]:
@@ -47,3 +52,14 @@ def test_a_changed_snapshot_is_refused(tmp_path: Path) -> None:
     check_frozen([_entry("g-1")], manifest)
     with pytest.raises(RuntimeError, match="changed after freezing"):
         check_frozen([{**_entry("g-1"), "context": "  run(other);"}], manifest)
+
+
+def test_probability_digest_ignores_labels_but_not_a_judge_s_answer() -> None:
+    # The snapshot digest leaves probabilities out so labelling cannot change it.
+    # This second digest is what stops a re-run judge rewriting the answers
+    # every hypothesis is computed from.
+    a, b = _entry("g-1"), _entry("g-2", 0.3, 0.6)
+    base = probability_digest([a, b])
+    assert probability_digest([b, a]) == base
+    assert probability_digest([{**a, "label": "false_positive", "labelled_by": "human"}, b]) == base
+    assert probability_digest([{**a, "probabilities": {"window": 0.81, "function": 0.8}}, b]) != base
