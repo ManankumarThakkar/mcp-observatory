@@ -1,7 +1,7 @@
 # MCP Security Observatory
 
 ![Python](https://img.shields.io/badge/python-3.11%2B-blue)
-![Tests](https://img.shields.io/badge/tests-624%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-782%20passing-brightgreen)
 ![Checks](https://img.shields.io/badge/ruff%20%7C%20mypy-clean-brightgreen)
 ![License](https://img.shields.io/badge/license-MIT-blue)
 
@@ -15,11 +15,13 @@ your privileges, and most editors start them automatically when you open a
 project. There is no sandbox and no review. This reads them without running a
 single line of them.
 
-> **What is live, stated precisely.** 1,643 servers scanned from a reproducible
-> sample of a 21,492-repository corpus. 1,296 findings, of which 323 are
-> published and 973 are withheld pending disclosure. **Accuracy has not been
-> measured yet:** 288 findings are drawn and captured for hand-labelling and none
-> are labelled, so every published finding is a candidate rather than a confirmed
+> **What is live, stated precisely.** On the nightly of 2026-10-01: 1,639
+> servers scanned from a reproducible 2,000-repository sample of a
+> 22,697-repository corpus. 975 findings, of which 171 are published and 804 are
+> withheld pending disclosure. The site always shows the latest night, so these
+> figures move. **Accuracy has not been measured yet:** 566 findings are drawn
+> and frozen, 116 of them are queued for labelling by a person, and none is
+> labelled yet, so every published finding is a candidate rather than a confirmed
 > problem. [What is not built yet](#-what-is-not-built-yet) lists the rest.
 
 ---
@@ -63,7 +65,7 @@ do something you never asked for, and you never see it.
 Published research found critical flaws in roughly a third of the servers it
 examined, and path-traversal bugs in 82% of those that touch files.
 
-Checking a plugin means reading the source of untrusted software — software you
+Checking a plugin means reading the source of untrusted software - software you
 must **never run** in order to inspect it.
 
 And the ecosystem is bigger than anyone says. Published counts disagree by a
@@ -102,17 +104,18 @@ Five rules look for the specific ways these plugins go wrong:
 | `SCOPE-OVERBROAD` | Permissions far wider than the plugin needs | ✅ |
 
 Clear-cut cases are decided by code alone and never cost anything. The
-genuinely ambiguous ones go to a judgement model, and **every one of those
-judgements is scored against a hand-labelled answer key.**
+genuinely ambiguous ones go to a judgement model, and **those judgements are
+to be scored against an answer key labelled by a person**, which is being built
+now and does not exist yet.
 
-Anything a plugin ships that its users never run — tests, build scripts,
-examples — is not scanned at all, because a flaw there is not a flaw an
+Anything a plugin ships that its users never run - tests, build scripts,
+examples - is not scanned at all, because a flaw there is not a flaw an
 assistant can reach. That single decision removed nearly half the findings on a
 trial run.
 
 > **Which servers get which checks.** The hidden-character rule reads every
 > server, because it needs no parser. The deeper rules read code, and today
-> they cover **TypeScript and JavaScript** — measured at 50% of both the
+> they cover **TypeScript and JavaScript** - measured at 50% of both the
 > registry and the unregistered population, against Python's 26–38%. Python
 > servers get the character check now and the deeper rules next. **A figure
 > from one language is never presented as an ecosystem-wide one.**
@@ -166,7 +169,7 @@ Other MCP scanners exist, and some are good. Four things are missing from the
 field.
 
 **📐 Accuracy measured on a random sample.** Where scanners report accuracy at
-all, it is usually against examples the authors chose themselves — which mostly
+all, it is usually against examples the authors chose themselves - which mostly
 shows whether the rules match the cases they were written from. Expect a figure
 well below perfect here. A perfect score is usually a sign the measurement was
 circular.
@@ -178,7 +181,7 @@ appended point per night and the scheduled job is written but not yet merged, so
 
 **🔒 Disclosure before publication.** Every high and critical finding is
 withheld by a gate in `analyzer/report/`, enforced in code rather than promised
-in a document — a finding cannot reach `data/` in a publishable state without
+in a document - a finding cannot reach `data/` in a publishable state without
 passing it. **The notification half is not built.** Since a window opens only
 when a notification is recorded, nothing above medium has ever been published,
 which is the gate failing closed.
@@ -205,7 +208,7 @@ flowchart TD
     E["<b>Triage</b><br/>language model<br/>adjudicates"]
     F["<b>Report</b><br/>disclosure gate, then<br/>SARIF and JSONL"]
     G["<b>Dashboard</b><br/>findings, and how often<br/>they are correct"]
-    H[("<b>Golden set</b><br/>hand labelled<br/>ground truth")]
+    H[("<b>Golden set</b><br/>labelled by a person<br/>in progress")]
 
     A --> B --> C --> D
     D -- yes --> F
@@ -298,11 +301,11 @@ different experience from finding them contradicted.
 
 | Not built | Consequence today | Why it is not done |
 | --- | --- | --- |
-| **Hand labels for the golden set** | No accuracy figure. 288 findings are drawn and captured; none are labelled. | It is hours of careful human judgement and cannot be delegated to a model without making the measurement circular. |
-| **Maintainer notification** | No disclosure window has ever opened, so every high and critical finding is withheld indefinitely and the index shows one rule of five. | Needs contact discovery, sending, rate limits, and a human deciding what the message says. |
+| **Human labels for the golden set** | No accuracy figure. 566 findings are drawn and frozen, and 116 are queued for a person to label; none is labelled yet. | It is hours of careful human judgement and cannot be delegated to a model without making the measurement circular. |
+| **Maintainer notification** | No disclosure window has ever opened, so every high and critical finding is withheld indefinitely and the index shows one rule of five. | Designed, not built. Only findings a person has verified will be reported, privately and one server at a time, so unverified alerts never reach a maintainer as a vulnerability claim. |
 | **Triage wired into the pipeline** | Findings reach the report from the rules alone; no model adjudicates in a real run. | The adjudicators, cache and spend guard are built and tested. Wiring them in without labels would spend money on judgements nobody can score. |
 | **An accuracy gate in CI** | CI checks tests, lint and types, not precision. | A required check with nothing behind it blocks every pull request forever. It gets added when there is a baseline to compare against. |
-| **The nightly job** | One point in the time series. | Written, not merged. |
+| **History between nights** | The nightly keeps nothing from one night to the next, so there is no time series yet and a disclosure window could never close. | The history holds withheld findings, so it has to be stored encrypted in a public repository. Designed, not built. |
 | **Python rules** | Four of five rules read TypeScript and JavaScript only. The character rule reads every language. | Rules are not translations of each other; the taint analysis differs per language. Stated per figure rather than averaged away. |
 
 ---
@@ -319,9 +322,9 @@ different experience from finding them contradicted.
 | SARIF output, disclosure gate | ✅ Done, enforced in code |
 | Public dashboard, deployed | ✅ [Live](https://manankumarthakkar.github.io/mcp-observatory/) |
 | Adjudicators, cache, spend guard, scoring script | ✅ Built, ⏳ not wired into a run |
-| Nightly job and the time series | ⏳ Written, not merged. One point so far |
-| Hand labels, and the accuracy figure they produce | ⏳ Not started. 288 entries drawn |
-| Maintainer notification | ⏳ Not started. Nothing above medium publishes without it |
+| Nightly scan, the only writer of the public site | ✅ Done. ⏳ Keeps no history yet, so no time series |
+| Human labels, and the accuracy figure they produce | ⏳ 566 entries frozen, 116 queued, none labelled by a person |
+| Maintainer notification | ⏳ Designed, not built. Nothing above medium publishes without it |
 
 The earlier version of this table said "nightly pipeline ✅ Done" and "public
 dashboard ⏳ Planned", which was wrong in both directions at once. Status tables
@@ -335,14 +338,14 @@ is unwired rather than only what exists.
 | Path | Purpose |
 |---|---|
 | `analyzer/crawler/` | Reads the registry, collapses entries to repositories, records coverage |
-| `analyzer/fetcher/` | Shallow-clones a server at a pinned commit, read only |
+| `analyzer/fetcher/` | Shallow-clones a server's default branch and records the commit it received, read only |
 | `analyzer/rules/` | Deterministic detection rules, tree-sitter based |
 | `analyzer/triage/` | Model adjudication of ambiguous findings, content-hash cached |
 | `analyzer/report/` | Disclosure gate, SARIF and JSONL output |
-| `evals/golden/` | Hand-labelled findings used to measure the triage layer |
-| `evals/harness/` | Precision, recall and F1 measurement, runs in CI |
+| `evals/golden/` | Findings drawn at random for labelling, with the source each judge was shown |
+| `evals/harness/` | Scoring and experiments against the golden set. Run by hand; only its unit tests run in CI |
 | `fixtures/` | Deliberately vulnerable and known-clean servers for rule tests |
-| `data/` | Committed scan artifacts. Git history provides the time series |
+| `data/` | The 2026-09-25 publication, committed by hand and kept as a record. Its finding counts are cumulative across local scans rather than one night's, and the live site is built from the nightly's own scan, so these are not current |
 | `web/` | Static dashboard |
 
 ---
@@ -358,7 +361,7 @@ is unwired rather than only what exists.
 
 ---
 
-📖 [`docs/methodology.md`](docs/methodology.md) — how every number was produced
-🔐 [`SECURITY.md`](SECURITY.md) — disclosure policy
-🧾 [`DECISIONS.md`](DECISIONS.md) — engineering log, every decision and what it cost
-📐 [`docs/specs/`](docs/specs/) — the design
+📖 [`docs/methodology.md`](docs/methodology.md) - how every number was produced
+🔐 [`SECURITY.md`](SECURITY.md) - disclosure policy
+🧾 [`DECISIONS.md`](DECISIONS.md) - engineering log, every decision and what it cost
+📐 [`docs/specs/`](docs/specs/) - the design
