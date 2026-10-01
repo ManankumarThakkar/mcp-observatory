@@ -71,6 +71,7 @@ def _run(
         now=lambda: FIXED_NOW,
         sample=sample,
         seed=seed,
+        disclosure_records={},  # these tests are about sampling, not disclosure
     )
 
 

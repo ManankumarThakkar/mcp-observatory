@@ -6,7 +6,7 @@ import os
 import subprocess
 import sys
 import tempfile
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
@@ -36,7 +36,7 @@ from analyzer.pipeline import (
     publish_from_history,
     run_pipeline,
 )
-from analyzer.report.gate import DISCLOSURE_WINDOW
+from analyzer.report.gate import DISCLOSURE_WINDOW, DisclosureRecord
 from analyzer.report.history_store import HistoryRefused, restore_history, save_history
 from analyzer.report.ledger import (
     WINDOW_CHANNELS,
@@ -44,13 +44,15 @@ from analyzer.report.ledger import (
     Notice,
     OptOut,
     check_notice,
+    disclosure_records,
+    load_ledger,
 )
 from analyzer.report.ledger_store import fetch_ledger, publish_ledger, read_branch_history
 from analyzer.report.merge import utc_stamp
 from analyzer.report.page import write_site
 from analyzer.report.site import build_site_data, write_site_data
 from analyzer.report.trend import append_point, point_from_site
-from analyzer.report.vault import VaultError
+from analyzer.report.vault import VaultError, unseal
 from analyzer.scanner import scan_directory
 
 # A directory scanned in place was never cloned, so there is no commit to
@@ -105,6 +107,7 @@ DEFAULT_DATA_DIR = Path("data")
 # repository is public and a withheld finding written to a public file is a
 # disclosed one.
 DEFAULT_CACHE_DIR = Path(".cache")
+DEFAULT_LEDGER_PATH = DEFAULT_CACHE_DIR / "ledger.jsonl"
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -148,6 +151,11 @@ def _build_parser() -> argparse.ArgumentParser:
         default=str(DEFAULT_CACHE_DIR),
         help="Where the full history lives. Never published.",
     )
+    scan.add_argument(
+        "--ledger",
+        default=str(DEFAULT_LEDGER_PATH),
+        help="The opened disclosure ledger. Missing means nobody has been notified.",
+    )
 
     publish = subcommands.add_parser(
         "publish",
@@ -158,6 +166,11 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     publish.add_argument(
         "--cache-dir", default=str(DEFAULT_CACHE_DIR), help="Where the full history lives."
+    )
+    publish.add_argument(
+        "--ledger",
+        default=str(DEFAULT_LEDGER_PATH),
+        help="The opened disclosure ledger. Missing means nobody has been notified.",
     )
     publish.add_argument(
         "--dry-run",
@@ -229,6 +242,9 @@ def _build_parser() -> argparse.ArgumentParser:
     opt_out = actions.add_parser("opt-out", help="Record a maintainer's request to be excluded.")
     opt_out.add_argument("--server", required=True)
     opt_out.add_argument("--requested-at", required=True)
+    opened = actions.add_parser("open", help="Open a sealed ledger for the nightly's gate.")
+    opened.add_argument("--sealed", required=True)
+    opened.add_argument("--out", required=True)
     show = actions.add_parser("show", help="Counts and window dates. Names no server.")
     show.add_argument(
         "--ids", action="store_true", help="Also print notice ids, which name servers."
@@ -408,6 +424,7 @@ def run_index_scan(
     cache_dir: Path,
     sample: int | None = None,
     seed: int = DEFAULT_SAMPLE_SEED,
+    disclosure_records: Mapping[str, DisclosureRecord],
     clone: CloneFn = shallow_clone,
     scan: ScanFn = scan_directory,
     now: Callable[[], datetime] = lambda: datetime.now(UTC),
@@ -445,7 +462,7 @@ def run_index_scan(
             workdir=Path(workdir),
             data_dir=data_dir,
             cache_dir=cache_dir,
-            disclosure_records={},
+            disclosure_records=disclosure_records,
             now=now(),
             tool_version=__version__,
         )
@@ -459,6 +476,7 @@ def _scan_index(args: argparse.Namespace) -> int:
         cache_dir=Path(args.cache_dir),
         sample=args.sample,
         seed=args.seed,
+        disclosure_records=disclosure_from_ledger(Path(args.ledger)),
     )
 
     drawn = f" (sample of {args.sample}, seed {args.seed})" if args.sample else ""
@@ -493,7 +511,7 @@ def _publish_command(args: argparse.Namespace) -> int:
                 # dry run raised instead of reporting.
                 data_dir=data_dir,
                 destination=Path(scratch),
-                disclosure_records={},
+                disclosure_records=disclosure_from_ledger(Path(args.ledger)),
                 now=datetime.now(UTC),
                 tool_version=__version__,
             )
@@ -507,7 +525,7 @@ def _publish_command(args: argparse.Namespace) -> int:
     result = publish_from_history(
         cache_dir=cache_dir,
         data_dir=data_dir,
-        disclosure_records={},
+        disclosure_records=disclosure_from_ledger(Path(args.ledger)),
         now=datetime.now(UTC),
         tool_version=__version__,
     )
@@ -566,6 +584,11 @@ def _when(stamp: str) -> datetime:
     return moment
 
 
+def disclosure_from_ledger(path: Path) -> dict[str, DisclosureRecord]:
+    """The gate's records from an opened ledger; none when there is no ledger yet."""
+    return disclosure_records(load_ledger(path))
+
+
 def _ledger_command(args: argparse.Namespace) -> int:
     """Read, change and push the sealed ledger. Run on the maintainer's machine only.
 
@@ -575,6 +598,21 @@ def _ledger_command(args: argparse.Namespace) -> int:
     key = os.environ.get("HISTORY_KEY", "")
     if not key:
         raise InputError("HISTORY_KEY is not set")
+
+    if args.ledger_action == "open":
+        # For the nightly, in its own step so the scan never holds the key. No
+        # ledger yet is a valid state - nobody has been notified - and leaves
+        # every serious finding withheld. A ledger that fails to open raises.
+        out = Path(args.out)
+        if Path(args.sealed).exists():
+            unseal(Path(args.sealed), out, key)
+            print(f"opened the ledger into {out}")
+        else:
+            out.parent.mkdir(parents=True, exist_ok=True)
+            out.write_text("", encoding="utf-8")
+            print("no ledger yet; nobody has been notified")
+        return 0
+
     repo = Path()
     entries, parent = fetch_ledger(repo, key=key)
     now = datetime.now(UTC)

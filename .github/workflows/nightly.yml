@@ -98,6 +98,29 @@ jobs:
           mcp-observatory history restore --sealed series/history.jsonl.gpg \
             --history .cache/history.jsonl --trend series/trend.jsonl $flag
 
+      # The ledger of notices sent to maintainers, written only from the
+      # maintainer's machine on its own branch; the nightly only reads it. Opened
+      # here so the scan, which handles third-party code, never holds the key.
+      # No branch yet means nobody has been notified, which leaves every serious
+      # finding withheld. A branch that cannot be reached fails the night rather
+      # than being read as no notices.
+      - name: Open the disclosure ledger
+        env:
+          HISTORY_KEY: ${{ secrets.HISTORY_KEY }}
+        run: |
+          set +e
+          git ls-remote --exit-code origin refs/heads/disclosure-ledger > /dev/null
+          code=$?
+          set -e
+          if [ "$code" -eq 0 ]; then
+            git fetch -q origin disclosure-ledger
+            git show FETCH_HEAD:ledger.jsonl.gpg > series/ledger.jsonl.gpg
+          elif [ "$code" -ne 2 ]; then
+            echo "could not reach the disclosure-ledger branch (git exited $code)"
+            exit 1
+          fi
+          mcp-observatory ledger open --sealed series/ledger.jsonl.gpg --out .cache/ledger.jsonl
+
       # Census only, deliberately. The code-search pass costs twenty minutes and
       # 198 requests against a ten-per-minute limit, and its figure moves on the
       # scale of months rather than nights. The erasure guard refuses to
