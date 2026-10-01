@@ -113,6 +113,19 @@ def _language(path: str) -> str:
     return LANGUAGE_BY_SUFFIX.get(suffix, UNKNOWN_LANGUAGE)
 
 
+# Everything that says who judged an entry and on what basis. Carried as one
+# set because a label separated from its provenance is worse than no label: it
+# reads as an answer and nobody can tell whose. Includes the fields the blind
+# annotation merge writes, so a re-draw after human labelling cannot drop them.
+PROVENANCE_FIELDS = (
+    "labelled_by",
+    "reason",
+    "annotators",
+    "model_label",
+    "model_reason",
+)
+
+
 def build_entries(
     findings: Sequence[Finding],
     *,
@@ -187,6 +200,16 @@ def build_entries(
                 "flagged_offset": min(finding.location.line - 1, CONTEXT_LINES),
                 "label": label,
                 "observations": carried,
+                # Who made the label, and why, travels with it. A re-draw that
+                # copied `label` alone dropped `labelled_by` from all 40 carried
+                # labels on 2026-10-01, so a model's label became an unattributed
+                # one: the conflation #46 closed, reopened by a path it did not
+                # touch.
+                **{
+                    name: previous[name]
+                    for name in PROVENANCE_FIELDS
+                    if previous is not None and previous.get(name) is not None
+                },
             }
         )
     return entries
