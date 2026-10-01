@@ -16,9 +16,14 @@ from evals.harness.experiment import verdict
 # changed any shown code does.
 FROZEN_FIELDS = ("entry_id", "finding_id", "commit_sha", "context", "context_function")
 
+# Registered in docs/study/preregistration.md: the sample, the bootstrap and the
+# one-per-server choice all use this seed, and the control has this size.
+STUDY_SEED = 20260926
+CONTROL_SIZE = 60
 
-def snapshot_digest(entries: Sequence[Mapping[str, Any]]) -> str:
-    """One hash over exactly what the judges were shown, in a fixed order.
+
+def _digest(entries: Sequence[Mapping[str, Any]], fields: Sequence[str]) -> str:
+    """One hash over the named fields of every entry, in a fixed order.
 
     Each field is hashed before being combined, the same guard `finding_id`
     uses, so content from a third-party repository cannot forge a boundary
@@ -26,9 +31,24 @@ def snapshot_digest(entries: Sequence[Mapping[str, Any]]) -> str:
     """
     combined = hashlib.sha256()
     for entry in sorted(entries, key=lambda e: str(e["entry_id"])):
-        for name in FROZEN_FIELDS:
-            combined.update(hashlib.sha256(json.dumps(entry.get(name)).encode()).digest())
+        for name in fields:
+            value = json.dumps(entry.get(name), sort_keys=True)
+            combined.update(hashlib.sha256(value.encode()).digest())
     return combined.hexdigest()
+
+
+def snapshot_digest(entries: Sequence[Mapping[str, Any]]) -> str:
+    """One hash over exactly what the judges were shown."""
+    return _digest(entries, FROZEN_FIELDS)
+
+
+def probability_digest(entries: Sequence[Mapping[str, Any]]) -> str:
+    """One hash over the judges' stored answers, which every hypothesis uses.
+
+    Kept apart from `snapshot_digest`, which deliberately leaves them out, so
+    that the registered digest describes only what the judges were shown.
+    """
+    return _digest(entries, ("entry_id", "probabilities"))
 
 
 def _identity(entry: Mapping[str, Any]) -> tuple[str, ...]:
