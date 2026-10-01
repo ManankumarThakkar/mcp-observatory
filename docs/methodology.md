@@ -40,7 +40,7 @@ everywhere.
 
 **The sample is the most surprising thing measured so far.** One twenty-minute
 pass found 13,694 repositories carrying an MCP server toolkit, and **13,291 of
-them appear in no registry at all** — 97%, consistent across two independent
+them appear in no registry at all** - 97%, consistent across two independent
 queries. Over 100,000 files on GitHub carry the JavaScript server toolkit and
 over 170,000 the Python one, against a registry that collapses to 21,356
 repositories.
@@ -98,7 +98,7 @@ One grammar covers the whole JavaScript family, including JSX inside `.js`
 files, so half the ecosystem costs roughly one language's work.
 
 This reversed an earlier decision. The original plan put Python first, argued
-from "roughly 45% Python and 30-35% TypeScript" — a figure that predated having
+from "roughly 45% Python and 30-35% TypeScript" - a figure that predated having
 a corpus to measure. See `DECISIONS.md` D3 and D6.
 
 Python servers get the character check in v1 and the deeper rules first after
@@ -236,8 +236,8 @@ than a better one that hides them:
    made worse because the labeller is itself a model, and naming it here does not
    excuse it. This section first said the labels were made "by hand"; that was
    wrong, and was corrected on 2026-09-26.
-3. **The rubric is a choice.** A different and equally defensible rule — that a
-   file-reading tool reading any file is doing its job — would move many labels.
+3. **The rubric is a choice.** A different and equally defensible rule - that a
+   file-reading tool reading any file is doing its job - would move many labels.
 
 The real figure comes from the golden set in D8: randomly sampled across the
 whole corpus, labelled through a separate process, and published as an open
@@ -247,7 +247,7 @@ benchmark with its sampling method and a scoring script.
 
 **The rules over-report by about a fifth**, and more usefully, **their own
 confidence flag is not a quality signal**. Findings marked high confidence
-scored 0.62 precision against 0.81 for reporting everything — the flag selects
+scored 0.62 precision against 0.81 for reporting everything - the flag selects
 a *worse* set than no filter at all.
 
 It means "the taint path is unambiguous", which turns out not to predict
@@ -281,7 +281,7 @@ used a per-decision price and a finding count (about 6,400) that were both
 superseded.
 
 One failure worth recording. The first integration sent the flagged expression
-alone, with no surrounding code, and every finding came back clustered at 0.7 —
+alone, with no surrounding code, and every finding came back clustered at 0.7 -
 a human could not have judged from that either. Twelve lines either side more
 than doubled the spread.
 
