@@ -314,7 +314,7 @@ different experience from finding them contradicted.
 | Analyzer core, fetcher, rule contract, CI | ✅ Done |
 | Registry crawler + coverage reporting | ✅ Done |
 | Discovery of unregistered servers | ✅ Done |
-| Scan orchestrator, measured at 3.1 hours for 21,492 repos | ✅ Done |
+| Scan orchestrator: a 2,000-repo sample measured at 14 minutes; the 21,492-repo census projected at 3.1 hours | ✅ Done |
 | Detection rules | ✅ 5 of 5, TypeScript and JavaScript |
 | SARIF output, disclosure gate | ✅ Done, enforced in code |
 | Public dashboard, deployed | ✅ [Live](https://manankumarthakkar.github.io/mcp-observatory/) |

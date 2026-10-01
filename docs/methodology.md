@@ -131,8 +131,8 @@ look at.
 
 ### Why there is a filter at all
 
-Roughly 1.05 million descriptions exist across the corpus, about $284 to
-adjudicate all of them once. The binding constraint is not money but time: at
+Roughly 1.05 million descriptions exist across the corpus, about $310 to
+adjudicate all of them once at the measured $0.000294 per decision. The binding constraint is not money but time: at
 under a second each, even 32 in parallel is over six hours, which exceeds the
 job limit on its own.
 
@@ -147,7 +147,7 @@ Two independent tests, either sufficient.
    length figure comes from a measured distribution: median 47, p90 141.
 
 Together these select **1.9%** of descriptions, about 1,825 across the corpus,
-roughly $0.49 to adjudicate.
+roughly $0.54 to adjudicate at the same measured price.
 
 ### Two things worth stating plainly
 
@@ -272,8 +272,13 @@ can inspect.
 and the pilot above is the first evidence the requirement is achievable, but
 committing before measuring properly is the failure D7 exists to prevent.
 
-Measured while testing it: 660ms median per decision, and **$1.72 for a full
-corpus run** at the ~6,400 low-confidence findings two rules produce.
+Measured in the pilot (2026-09-22): 660ms median per decision. Measured again
+over all 288 golden-set entries (2026-09-24): **$0.000294 per decision**, 715ms
+median. The two adjudicated rules produce about 11,900 findings across the
+corpus, so a first full pass costs about **$3.50**, and later passes approach
+zero through the cache. An earlier version of this page said $1.72 a run; it
+used a per-decision price and a finding count (about 6,400) that were both
+superseded.
 
 One failure worth recording. The first integration sent the flagged expression
 alone, with no surrounding code, and every finding came back clustered at 0.7 —
@@ -282,13 +287,19 @@ than doubled the spread.
 
 ## Cost and runtime
 
-| | measured |
-| --- | --- |
-| Registry crawl | ~90 seconds, 343 pages |
-| Code-search pass | ~20 minutes, bounded at 200 requests |
-| Full scan, 35,050 repositories | ~2.0 hours at 8 workers |
-| Parsing overhead | 66 ms per repository |
-| Adjudication | ~$1.72 per corpus run |
+Each figure says whether it was measured or derived, because a projection
+reported as a measurement is the error this project exists to avoid.
+
+| | figure | basis |
+| --- | --- | --- |
+| Registry crawl | ~90 seconds, 343 pages | measured |
+| Code-search pass | ~20 minutes, bounded at 200 requests | measured |
+| Scan of a 2,000-repository sample | 14 minutes at 8 workers | measured |
+| Full census, 21,492 repositories | ~3.1 hours at 8 workers | projected from the sample |
+| Nightly in CI (crawl, sample scan, site) | 27 to 38 minutes | measured, four nights, 2026-09-27 to 30 |
+| Parsing overhead | 66 ms per repository | measured |
+| Adjudication, per decision | $0.000294, 715 ms median | measured, 288 decisions, 2026-09-24 |
+| Adjudication, first full pass | ~$3.50 | derived: measured price times ~11,900 findings |
 
 Sequential scanning would be 9.5 hours and would not fit a six-hour job limit,
 which is why the orchestrator is concurrent.
