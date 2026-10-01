@@ -222,3 +222,47 @@ def test_a_history_from_a_single_run_is_entirely_live() -> None:
     rows = [{"finding_id": str(n), "rule_id": "R", "last_seen": "2026-09-25T15:00:00Z"} for n in range(3)]
 
     assert len(live_findings(rows)) == 3
+
+
+def test_a_redraw_carries_who_made_a_label_and_why() -> None:
+    """A label must never travel without its provenance.
+
+    Found 2026-10-01: expanding the golden set to 104 per rule carried 40 labels
+    across and dropped `labelled_by` from every one, because the re-draw copied
+    `label` and nothing beside it. All 40 were Claude's, and the record of that
+    vanished: exactly the conflation #46 was written to prevent, reintroduced by a
+    path #46 did not touch. Failing closed meant nothing was misreported as human,
+    but a reader could no longer tell a model's label from an unattributed one.
+    """
+    finding = _finding("SHELL-EXEC-UNSAFE", 5)
+    existing = [
+        {
+            "entry_id": "g-0007",
+            "finding_id": finding.finding_id,
+            "label": "false_positive",
+            "labelled_by": "human",
+            "reason": "the caller sanitises the argument",
+            "annotators": ["manan", "second"],
+            "model_label": "true_positive",
+            "model_reason": "looked reachable",
+        }
+    ]
+
+    entry = build_entries([finding], contexts={finding.finding_id: "x"}, existing=existing)[0]
+
+    assert entry["labelled_by"] == "human"
+    assert entry["reason"] == "the caller sanitises the argument"
+    assert entry["annotators"] == ["manan", "second"]
+    assert entry["model_label"] == "true_positive"
+    assert entry["model_reason"] == "looked reachable"
+
+
+def test_a_new_entry_has_no_provenance_fields_to_misread() -> None:
+    """An unlabelled entry carries no labeller, rather than an empty one that a
+    reader might take for an answer."""
+    finding = _finding("SHELL-EXEC-UNSAFE", 5)
+
+    entry = build_entries([finding], contexts={finding.finding_id: "x"}, existing=[])[0]
+
+    assert entry.get("labelled_by") is None
+    assert "annotators" not in entry
