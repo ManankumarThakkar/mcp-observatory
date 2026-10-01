@@ -58,10 +58,15 @@ def restore_history(
             f"a sealed history exists at {sealed}; bootstrapping would discard it"
         )
 
-    unseal(sealed, history, key)
     points = load_trend(trend)
+    if not points:
+        raise HistoryRefused(
+            f"a sealed history exists but there is no series at {trend} to check it "
+            "against; the two are always saved together"
+        )
+    unseal(sealed, history, key)
     newest = _newest_last_seen(history)
-    if points and newest is not None and newest != points[-1].scanned_at:
+    if newest is not None and newest != points[-1].scanned_at:
         history.unlink()
         raise HistoryRefused(
             f"the history ends at {newest} but the series ends at {points[-1].scanned_at}; "

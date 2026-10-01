@@ -150,3 +150,24 @@ def test_a_saved_history_restores_through_real_gpg_and_agrees_with_its_series(
     restored = tmp_path / "cache" / "history.jsonl"
     restore_history(tmp_path / "history.jsonl.gpg", restored, trend, key=KEY, bootstrap=False)
     assert restored.read_bytes() == history.read_bytes()
+
+
+def test_a_history_that_was_never_encrypted_is_refused(tmp_path: Path) -> None:
+    # Measured: `gpg --store` writes an unencrypted message that `--decrypt`
+    # accepts with exit 0, no key needed. A clean exit is therefore not proof
+    # of anything; anyone able to push the file could plant a history.
+    planted = tmp_path / "planted.jsonl"
+    planted.write_text('{"finding_id": "planted"}\n', encoding="utf-8")
+    sealed = tmp_path / "history.jsonl.gpg"
+    home = tmp_path / "g"
+    home.mkdir(mode=0o700)
+    subprocess.run(
+        ["gpg", "--homedir", str(home), "--batch", "--quiet", "--store", "-o", str(sealed), str(planted)],
+        check=True,
+        capture_output=True,
+    )
+    opened = tmp_path / "out" / "history.jsonl"
+    opened.parent.mkdir()
+    with pytest.raises(VaultError, match="not decrypted"):
+        unseal(sealed, opened, KEY)
+    assert list(opened.parent.iterdir()) == []

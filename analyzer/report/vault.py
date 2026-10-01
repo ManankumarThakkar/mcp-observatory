@@ -4,11 +4,14 @@ The repository is public, so the history can only be stored next to the
 published series if it is encrypted. `gpg --symmetric` is used because it is
 preinstalled on the CI runner and its format carries an integrity check.
 
-That check does not by itself fail closed. Measured on 2026-10-01: given a
-ciphertext with one byte flipped, gpg reports that the message was manipulated
-and exits 2, yet still writes the whole altered plaintext to its output. So
-the exit code is the only guard, and nothing gpg writes is used unless it
-exited cleanly.
+That check does not by itself fail closed, and a clean exit is not proof
+either. Measured on 2026-10-01:
+- given a ciphertext with one byte flipped, gpg reports that the message was
+  manipulated and exits 2, yet still writes the whole altered plaintext;
+- given a file that was never encrypted (`gpg --store`), gpg "decrypts" it with
+  exit 0 and no key at all.
+So nothing gpg writes is used unless it exited cleanly and its status lines
+show a real decryption with integrity protection.
 """
 
 import hashlib
@@ -32,8 +35,11 @@ def _check_key(passphrase: str) -> None:
         raise ValueError("the history key must be one non-empty line")
 
 
-def _gpg(arguments: list[str], passphrase: str) -> None:
+def _gpg(arguments: list[str], passphrase: str) -> list[str]:
     """Run gpg with the key on stdin, never in its arguments.
+
+    Returns gpg's machine-readable status lines, written to stdout because the
+    data itself always goes to a file.
 
     Arguments are readable by every process on the machine. A private home
     directory under /tmp keeps the run away from any real keyring and short
@@ -56,6 +62,8 @@ def _gpg(arguments: list[str], passphrase: str) -> None:
                 "loopback",
                 "--passphrase-fd",
                 "0",
+                "--status-fd",
+                "1",
                 *arguments,
             ],
             input=passphrase + "\n",
@@ -68,12 +76,33 @@ def _gpg(arguments: list[str], passphrase: str) -> None:
         # The agent gpg starts exits by itself once its socket is gone, about
         # five seconds after this (measured). An explicit `gpgconf --kill` cost
         # 1.2 seconds a call. Running with no agent at all is not an option:
-        # gpg then exits 2 even on success, and the exit code is the only
-        # tamper signal this module has.
+        # gpg then exits 2 even on success, which would make the exit code
+        # meaningless.
         shutil.rmtree(home, ignore_errors=True)
     if result.returncode != 0:
         reason = result.stderr.strip().splitlines()[-1] if result.stderr.strip() else "no message"
         raise VaultError(f"gpg exited {result.returncode}: {reason}")
+    return [
+        line.removeprefix("[GNUPG:] ")
+        for line in result.stdout.splitlines()
+        if line.startswith("[GNUPG:] ")
+    ]
+
+
+def _require_decrypted(status: list[str]) -> None:
+    """Refuse output that gpg did not actually decrypt with integrity protection.
+
+    DECRYPTION_INFO carries the integrity method and the AEAD algorithm; one of
+    them must be non-zero, or the file could have been altered undetectably.
+    """
+    keywords = {line.split()[0]: line.split()[1:] for line in status if line.split()}
+    info = keywords.get("DECRYPTION_INFO", [])
+    protected = bool(info) and (info[0] != "0" or (len(info) > 2 and info[2] != "0"))
+    if not ("BEGIN_DECRYPTION" in keywords and "DECRYPTION_OKAY" in keywords and protected):
+        raise VaultError(
+            "the file was not decrypted with integrity protection, so it may not be a "
+            "sealed history at all"
+        )
 
 
 def _sha256(path: Path) -> str:
@@ -94,7 +123,8 @@ def unseal(sealed: Path, plaintext: Path, passphrase: str) -> None:
     _check_key(passphrase)
     staged = _temporary_beside(plaintext)
     try:
-        _gpg(["--decrypt", "--output", str(staged), str(sealed)], passphrase)
+        status = _gpg(["--decrypt", "--output", str(staged), str(sealed)], passphrase)
+        _require_decrypted(status)
         os.replace(staged, plaintext)
     finally:
         staged.unlink(missing_ok=True)

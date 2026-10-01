@@ -123,3 +123,14 @@ def test_the_command_reads_the_key_from_the_environment_and_refuses_in_a_sentenc
     assert "bootstrap" in capsys.readouterr().err
     assert main([*args, "--bootstrap"]) == 0
     assert (tmp_path / "h.jsonl").exists()
+
+
+def test_a_sealed_history_with_no_series_to_check_it_against_is_refused(tmp_path: Path) -> None:
+    # Both are committed together, so a history without a series means the
+    # series was removed, and the rollback check would otherwise be skipped.
+    history = tmp_path / "cache" / "history.jsonl"
+    with pytest.raises(HistoryRefused, match="no series"):
+        restore_history(
+            _sealed(tmp_path, NIGHT_ONE), history, _trend(tmp_path), key=KEY, bootstrap=False
+        )
+    assert not history.exists()
