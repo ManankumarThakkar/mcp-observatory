@@ -130,3 +130,23 @@ def test_a_key_gpg_would_misread_is_refused(tmp_path: Path, key: str) -> None:
     # newline would silently seal with a different key than the one stored.
     with pytest.raises(ValueError, match="key"):
         seal(_plain(tmp_path), tmp_path / "history.jsonl.gpg", key)
+
+
+def test_a_saved_history_restores_through_real_gpg_and_agrees_with_its_series(
+    tmp_path: Path,
+) -> None:
+    from analyzer.report.history_store import restore_history, save_history
+
+    stamp = "2026-10-02T03:20:00Z"
+    history = tmp_path / "history.jsonl"
+    history.write_text(f'{{"finding_id": "f-1", "last_seen": "{stamp}"}}\n', encoding="utf-8")
+    trend = tmp_path / "trend.jsonl"
+    trend.write_text(
+        '{"scanned_at": "' + stamp + '", "corpus": 1, "scanned": 1, "findings_found": 1, '
+        '"findings_published": 0, "withheld": 1, "servers_affected": 1, "by_rule": {}}\n',
+        encoding="utf-8",
+    )
+    save_history(history, tmp_path / "history.jsonl.gpg", key=KEY)
+    restored = tmp_path / "cache" / "history.jsonl"
+    restore_history(tmp_path / "history.jsonl.gpg", restored, trend, key=KEY, bootstrap=False)
+    assert restored.read_bytes() == history.read_bytes()
