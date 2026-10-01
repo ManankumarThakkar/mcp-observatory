@@ -34,23 +34,30 @@ public dashboard until the disclosure process below completes. This is enforced
 in `analyzer/report/`, not by convention: a finding cannot reach `data/` in a
 publishable state without passing the gate.
 
-**Notification is not implemented yet, and nothing has been notified.** Step 1
-below describes the intended process, not a process that has run. A window opens
-only when a notification is recorded, so today no window has opened and every
-high and critical finding is withheld indefinitely. That fails closed, which is
+**No maintainer has been notified yet.** The record of notices exists and the
+gate reads it every night, but nothing has been sent, so no window has opened
+and every high and critical finding is withheld. That fails closed, which is
 the right direction, and it means this project currently publishes one rule of
-five. Saying so is better than a policy that reads as though the process were
-running.
+five.
 
 ## Disclosure process
 
-**Intended, not yet implemented.** See the note above.
-
-1. Maintainer is notified privately via GitHub Security Advisory.
-2. A 90-day window opens from the date of notification.
-3. After the window closes, or once a fix ships, the finding may be published.
-4. Findings for archived or clearly abandoned projects are published as
-   `unmaintained` after notification is attempted.
+1. **Only findings a person has verified are reported.** Static analysis
+   produces false positives, and reporting every alert would send maintainers
+   mostly false alarms. A finding is reported only after a person has read the
+   code and labelled it real. This is enforced in code: a notice naming an
+   unverified finding cannot be recorded.
+2. **The maintainer is told privately**, in this order of preference: a GitHub
+   private vulnerability report; the contact in the repository's `SECURITY.md`;
+   or, failing both, a public issue that asks only for a security contact and
+   describes nothing. Each notice is written and sent by a person, never in an
+   automated batch.
+3. **A 90-day window opens for each finding a notice names**, from the date the
+   notice was sent. A notice opens no window for a finding it did not name, and
+   a request for a contact opens none at all.
+4. **After a finding's window closes, it may be published.**
+5. **A finding that was never verified and reported is never published
+   individually.** It appears only in aggregate counts.
 
 ## Never published
 
@@ -60,12 +67,12 @@ its location; they do not provide a working attack.
 ## False positives
 
 Static analysis produces false positives. Every finding carries a confidence
-level. Per-rule precision is measured against a hand-labelled golden set and
-published alongside the results - **that measurement has not been made yet.**
-288 findings have been drawn at random and captured for labelling; none are
-labelled. Until they are, treat every finding as a candidate rather than a
-confirmed problem. Maintainers may dispute a finding by opening an
-issue.
+level. Per-rule precision will be measured against findings drawn at random and
+labelled by a person, and published alongside the results - **that measurement
+has not been made yet.** 566 findings are drawn and frozen, and 116 are queued
+for a person to label; none is labelled yet. Until they are, treat every
+finding as a candidate rather than a confirmed problem. Maintainers may dispute
+a finding by opening an issue.
 
 ## Opt-out
 
