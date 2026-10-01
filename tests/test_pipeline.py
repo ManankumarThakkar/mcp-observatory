@@ -195,7 +195,7 @@ def test_the_first_run_has_nothing_to_collapse_from(tmp_path: Path) -> None:
 
 # --- partial runs -------------------------------------------------------------
 
-def test_a_server_that_failed_tonight_keeps_its_earlier_findings(tmp_path: Path) -> None:
+def test_a_server_that_failed_tonight_keeps_its_records_in_the_history(tmp_path: Path) -> None:
     """Spec section 9's partial-run tolerance, carried through the pipeline."""
     _run(tmp_path, [_record("a/one"), _record("b/two")], scan=_scanner("medium"))
 
@@ -219,8 +219,14 @@ def test_a_server_that_failed_tonight_keeps_its_earlier_findings(tmp_path: Path)
     )
 
     assert result.failed == 1
+    # The history keeps the failed server's records: a failed scan is not a fixed
+    # server, so nothing is erased. The site shows tonight's scan only, which is
+    # what production already did; item 5 of the disclosure design decides how a
+    # record not seen tonight is shown (decided 2026-10-01).
+    history = {r["server_id"] for r in load_previous(tmp_path / "cache" / "history.jsonl")}
     published = {r["server_id"] for r in load_previous(tmp_path / "data" / "findings.jsonl")}
-    assert published == {"a/one", "b/two"}, "a failed scan is not a fixed server"
+    assert history == {"a/one", "b/two"}, "a failed scan is not a fixed server"
+    assert published == {"a/one"}
 
 
 def test_the_sarif_document_carries_only_published_findings(tmp_path: Path) -> None:
@@ -327,3 +333,43 @@ def test_a_server_with_nothing_published_is_not_listed(tmp_path: Path) -> None:
     )
 
     assert json.loads((tmp_path / "data" / SERVERS_FILE).read_text()) == []
+
+
+def test_a_finding_tonight_s_scan_no_longer_produces_is_neither_published_nor_counted(
+    tmp_path: Path,
+) -> None:
+    """Once the history persists between nights it holds every scan, and
+    publishing from all of it would list fixed findings as current and count
+    them in every total."""
+    _run(tmp_path, [_record("a/one")], scan=_scanner("medium"))
+
+    def moved(root: Path, server_id: str, commit_sha: str) -> ScanReport:
+        return ScanReport(findings=(_finding(server_id, "medium", line=7),), skipped=())
+
+    _run(tmp_path, [_record("a/one")], scan=moved, now=NOW + timedelta(days=1))
+
+    published = load_previous(tmp_path / "data" / "findings.jsonl")
+    summary = json.loads((tmp_path / "data" / "summary.json").read_text())
+    assert [p["location"]["line"] for p in published] == [7]
+    assert summary["found_by_rule"] == {"UNICODE-CONCEAL": 1}
+    assert len(load_previous(tmp_path / "cache" / "history.jsonl")) == 2
+
+
+def test_a_persisted_history_publishes_what_tonight_alone_would(tmp_path: Path) -> None:
+    """The acceptance test for persisting history: the public output is the
+    same findings and the same counts as a run with no history at all."""
+    with_history, fresh = tmp_path / "kept", tmp_path / "fresh"
+    servers = [_record("a/one"), _record("b/two")]
+    _run(with_history, servers, scan=_scanner("medium"))
+    _run(with_history, [_record("a/one")], scan=_scanner("medium"), now=NOW + timedelta(days=1))
+    _run(fresh, [_record("a/one")], scan=_scanner("medium"), now=NOW + timedelta(days=1))
+
+    def public(root: Path) -> tuple[list[str], dict[str, object]]:
+        findings = load_previous(root / "data" / "findings.jsonl")
+        summary = json.loads((root / "data" / "summary.json").read_text())
+        return (
+            sorted(f["finding_id"] for f in findings),
+            {k: summary[k] for k in ("disclosure", "found_by_rule")},
+        )
+
+    assert public(with_history) == public(fresh)

@@ -10,6 +10,7 @@ from analyzer.report.gate import DisclosureRecord
 from analyzer.report.merge import write_findings
 
 NOW = datetime(2026, 9, 24, 12, 0, 0, tzinfo=UTC)
+SCANNED_AT = "2026-09-23T05:27:12Z"
 
 
 def _finding(n: int, severity: str = "medium") -> Finding:
@@ -30,16 +31,18 @@ def _prior_scan(data_dir: Path, scanned: int = 1642) -> None:
     data_dir.mkdir(parents=True, exist_ok=True)
     (data_dir / SUMMARY_FILE).write_text(
         json.dumps(
-            {"generated_at": "2026-09-23T05:27:12Z", "scanned": scanned, "skipped": 358, "failed": 0}
+            {"generated_at": SCANNED_AT, "scanned": scanned, "skipped": 358, "failed": 0}
         ),
         encoding="utf-8",
     )
 
 
-def _history(path: Path, findings: list[Finding]) -> None:
+def _history(path: Path, findings: list[Finding], *, last_seen: str | None = None) -> None:
+    """Records as a scan writes them: stamped with the moment its summary names."""
+    last_seen = last_seen or SCANNED_AT
     write_findings(
         path,
-        [{**f.to_dict(), "first_seen": "2026-09-23T00:00:00Z", "last_seen": "2026-09-23T00:00:00Z"} for f in findings],
+        [{**f.to_dict(), "first_seen": SCANNED_AT, "last_seen": last_seen} for f in findings],
     )
 
 
@@ -230,3 +233,40 @@ def test_publishing_writes_in_place_when_no_destination_is_given(tmp_path: Path)
     )
 
     assert "published_at" in json.loads((data / SUMMARY_FILE).read_text())
+
+
+def test_republication_publishes_and_counts_only_the_scan_its_summary_describes(
+    tmp_path: Path,
+) -> None:
+    """The defect behind #43: 1,301 records counted when the scan the summary
+    described had produced 1,122."""
+    cache, data = tmp_path / "cache", tmp_path / "data"
+    _prior_scan(data)
+    write_findings(
+        cache / "history.jsonl",
+        [
+            {**_finding(1).to_dict(), "first_seen": SCANNED_AT, "last_seen": SCANNED_AT},
+            {**_finding(2).to_dict(), "first_seen": "2026-09-22T00:00:00Z", "last_seen": "2026-09-22T00:00:00Z"},
+        ],
+    )
+
+    result = publish_from_history(
+        cache_dir=cache, data_dir=data, disclosure_records={}, now=NOW, tool_version="0.1.0"
+    )
+
+    summary = json.loads((data / SUMMARY_FILE).read_text())
+    assert result.published == 1
+    assert summary["found_by_rule"] == {"SCOPE-OVERBROAD": 1}
+
+
+def test_a_summary_without_a_scan_date_is_refused(tmp_path: Path) -> None:
+    """Without the scan's date there is no way to tell its findings from older ones."""
+    cache, data = tmp_path / "cache", tmp_path / "data"
+    data.mkdir(parents=True)
+    (data / SUMMARY_FILE).write_text(json.dumps({"scanned": 1642}), encoding="utf-8")
+    _history(cache / "history.jsonl", [_finding(1)])
+
+    with pytest.raises(ValueError, match="generated_at"):
+        publish_from_history(
+            cache_dir=cache, data_dir=data, disclosure_records={}, now=NOW, tool_version="0.1.0"
+        )

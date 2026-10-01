@@ -124,6 +124,17 @@ def load_previous(path: Path) -> list[Record]:
     return records
 
 
+def seen_in(records: Iterable[Record], stamp: str) -> list[Record]:
+    """The records one scan produced, out of a history that holds every scan.
+
+    Every published finding and every count comes from here. The history keeps
+    older records because a disclosure window outlives a night, but counting
+    them as current is how a republication once reported 1,301 findings for a
+    scan that had produced 1,122.
+    """
+    return [record for record in records if record.get("last_seen") == stamp]
+
+
 def write_findings(path: Path, records: Iterable[Record]) -> None:
     """Write the history as one JSON object per line.
 

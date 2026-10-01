@@ -5,7 +5,7 @@ from typing import Any
 import pytest
 
 from analyzer.models import Finding, Location
-from analyzer.report.merge import load_previous, merge_findings, write_findings
+from analyzer.report.merge import load_previous, merge_findings, seen_in, write_findings
 
 NOW = "2026-09-20T00:00:00Z"
 EARLIER = "2026-08-01T00:00:00Z"
@@ -178,3 +178,17 @@ def test_the_file_is_one_json_object_per_line(tmp_path: Path) -> None:
     lines = path.read_text(encoding="utf-8").splitlines()
     assert len(lines) == 2
     assert all(json.loads(line) for line in lines)
+
+
+def test_seen_in_keeps_only_the_records_one_scan_stamped() -> None:
+    """What one scan found, out of a history that holds every scan.
+
+    Counting the whole history is how a republication once reported 1,301
+    findings when the scan it described had produced 1,122.
+    """
+    records = [
+        {"finding_id": "a", "last_seen": NOW},
+        {"finding_id": "b", "last_seen": EARLIER},
+        {"finding_id": "c", "last_seen": NOW},
+    ]
+    assert [r["finding_id"] for r in seen_in(records, NOW)] == ["a", "c"]
