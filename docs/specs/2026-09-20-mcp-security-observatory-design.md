@@ -247,9 +247,12 @@ passing it.
 ## 12. Deployment
 
 - **Compute:** GitHub Actions, nightly cron. Free for this workload.
-- **Hosting:** Render static site, free tier.
+- **Hosting:** GitHub Pages, deployed by the nightly workflow, which is the
+  site's only writer.
 - **Storage:** the git repository. No database.
-- **Secrets:** `ANTHROPIC_API_KEY` and `GITHUB_TOKEN` as Actions secrets.
+- **Secrets:** none configured. The workflows use the token GitHub Actions
+  provides automatically. The decision model's key lives in the maintainer's
+  macOS Keychain and is never in CI, because adjudication does not run there yet.
 - **Measured run cost, 2026-09-25.** Every figure here is measured rather than
   estimated. What it replaces was arithmetic on real prices applied to guessed
   token counts, and the guess was the weak half. Adjudication costs **$0.000294
