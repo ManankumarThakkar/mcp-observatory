@@ -5,6 +5,21 @@ on:
     # 03:10 UTC. Off the hour because the hour is when every scheduled job on
     # the platform fires at once and queueing is worst.
     - cron: "10 3 * * *"
+  # The site has exactly one writer, and this is it. A merged change to how
+  # findings are produced or rendered rebuilds the site from a fresh scan, never
+  # from the `data/` committed to main: that is a reviewed snapshot, it goes stale
+  # the night after it merges, and deploying it from a second workflow meant the
+  # public numbers flipped between two datasets depending on which ran last.
+  # After #44 merged, the site showed the old rule's 324 findings for most of a
+  # day until the next nightly replaced them with 171.
+  #
+  # All of analyzer/, not just the report and rules: a scanner or crawler change
+  # alters the output just as much.
+  push:
+    branches: [main]
+    paths:
+      - "analyzer/**"
+      - ".github/workflows/nightly.yml"
   workflow_dispatch:
 
 permissions:
@@ -12,6 +27,8 @@ permissions:
 
 # Never two at once. Two scans would append two points for the same night and
 # race on the trend branch, and the loser's measurement would be lost silently.
+# Queued rather than cancelled, so a push landing during the scheduled run waits
+# for it instead of killing a scan twenty minutes in.
 concurrency:
   group: nightly
   cancel-in-progress: false
@@ -88,6 +105,12 @@ jobs:
               problems.append("the page does not mention withheld findings")
           if not series:
               problems.append("no trend point was recorded")
+          # Carried over from the retired Pages workflow, so removing the second
+          # writer does not quietly weaken the gate.
+          if not Path("web/findings.html").exists():
+              problems.append("findings.html was not built")
+          if not list(Path("web/servers").glob("*.html")):
+              problems.append("no server pages were built")
 
           if problems:
               sys.exit("refusing to publish:\n  " + "\n  ".join(problems))
