@@ -36,10 +36,12 @@ from analyzer.pipeline import (
     publish_from_history,
     run_pipeline,
 )
+from analyzer.report.history_store import HistoryRefused, restore_history, save_history
 from analyzer.report.merge import utc_stamp
 from analyzer.report.page import write_site
 from analyzer.report.site import build_site_data, write_site_data
 from analyzer.report.trend import append_point, point_from_site
+from analyzer.report.vault import VaultError
 from analyzer.scanner import scan_directory
 
 # A directory scanned in place was never cloned, so there is no commit to
@@ -175,6 +177,22 @@ def _build_parser() -> argparse.ArgumentParser:
         "--no-trend",
         action="store_true",
         help="Build the pages without recording a point. For a local preview.",
+    )
+
+    history = subcommands.add_parser(
+        "history",
+        help="Restore or save the sealed findings history. The key is read from HISTORY_KEY.",
+    )
+    history.add_argument("action", choices=("restore", "save"))
+    history.add_argument("--sealed", required=True, help="The encrypted history file.")
+    history.add_argument("--history", required=True, help="The plaintext history the scan reads.")
+    history.add_argument(
+        "--trend", help="The series saved with the history; restore checks the two agree."
+    )
+    history.add_argument(
+        "--bootstrap",
+        action="store_true",
+        help="Start from no history. First night only; refused if a sealed history exists.",
     )
 
     crawl = subcommands.add_parser(
@@ -477,6 +495,31 @@ def _published_repo_urls(data_dir: Path) -> dict[str, str]:
     }
 
 
+def _history_command(args: argparse.Namespace) -> int:
+    """Restore or save the sealed history, the key coming from the environment.
+
+    From the environment rather than a flag, because a flag would put the key
+    in the process list and in shell history.
+    """
+    key = os.environ.get("HISTORY_KEY", "")
+    if args.action == "save":
+        save_history(Path(args.history), Path(args.sealed), key=key)
+        print(f"sealed {args.history} into {args.sealed}")
+        return 0
+    if not args.trend:
+        raise InputError("history restore needs --trend to check the history against")
+    print(
+        restore_history(
+            Path(args.sealed),
+            Path(args.history),
+            Path(args.trend),
+            key=key,
+            bootstrap=args.bootstrap,
+        )
+    )
+    return 0
+
+
 def _site_command(args: argparse.Namespace) -> int:
     """Build the page's data from the published findings."""
     site = build_site_data(Path(args.data_dir))
@@ -556,6 +599,8 @@ def main(argv: list[str] | None = None) -> int:
             return _publish_command(args)
         if args.command == "site":
             return _site_command(args)
+        if args.command == "history":
+            return _history_command(args)
         return _crawl(args)
     except (
         CollapsedRun,
@@ -570,6 +615,8 @@ def main(argv: list[str] | None = None) -> int:
         # printed each as the same tidy line as a mistyped flag. Those guards
         # are worth having only while they are loud.
         InputError,
+        HistoryRefused,
+        VaultError,
         FetchFailed,
         GitHubSearchError,
         RegistryError,

@@ -15,6 +15,7 @@ from analyzer.report.gate import DisclosureRecord, disclosure_state, split_for_p
 from analyzer.report.merge import (
     load_previous,
     merge_findings,
+    seen_in,
     utc_stamp,
     write_findings,
 )
@@ -108,6 +109,15 @@ def _previous_coverage(summary_path: Path) -> int | None:
     return scanned if isinstance(scanned, int) else None
 
 
+def _scan_stamp(summary_path: Path) -> str | None:
+    """The moment the published scan ran, which is the `last_seen` it wrote."""
+    try:
+        stamp = json.loads(summary_path.read_text(encoding="utf-8")).get("generated_at")
+    except (OSError, json.JSONDecodeError):
+        return None
+    return stamp if isinstance(stamp, str) else None
+
+
 def _previous_scanned(summary_path: Path) -> int:
     """How many servers last night's run covered, or zero if there was none."""
     if not summary_path.exists():
@@ -143,7 +153,7 @@ def run_pipeline(
     **Merge happens before the gate, never after.** Merging maintains
     first_seen and last_seen for every finding including withheld ones,
     because the series has to stay continuous across the ninety-day window.
-    The gate then decides which of those merged records leave for publication.
+    The gate then decides which of tonight's records leave for publication.
     Invert the two and either the trend breaks or withheld findings leak.
 
     Only findings from servers that passed validation are recorded at all. A
@@ -188,9 +198,10 @@ def run_pipeline(
     ]
     merged = merge_findings(load_previous(history_path), current, now=stamp)
     write_findings(history_path, merged)
+    tonight = seen_in(merged, stamp)
 
     published_count, counts = _publish(
-        merged,
+        tonight,
         data_dir=data_dir,
         disclosure_records=disclosure_records,
         now=now,
@@ -209,7 +220,7 @@ def run_pipeline(
         published=published_count,
         withheld=counts["withheld"] + counts["opted_out"],
     )
-    _write_summary(summary_path, result, counts, stamp, tool_version, intake, merged)
+    _write_summary(summary_path, result, counts, stamp, tool_version, intake, tonight)
     return result
 
 
@@ -243,7 +254,7 @@ def _write_servers(path: Path, repo_urls: Mapping[str, str], findings_path: Path
 
 
 def _publish(
-    merged: Sequence[Mapping[str, Any]],
+    scan_findings: Sequence[Mapping[str, Any]],
     *,
     data_dir: Path,
     disclosure_records: Mapping[str, DisclosureRecord],
@@ -257,11 +268,12 @@ def _publish(
     published" would drift, and the drift would surface as findings reaching
     a public directory by the path nobody was checking.
 
-    The gate runs over the whole history rather than one night's findings, so a
-    finding withheld last month is published when its window closes rather
-    than waiting to be seen again.
+    It is given one scan's findings, never the whole history. A finding whose
+    window closes after it stopped being produced is not published here yet:
+    showing it as "no longer seen" is item 5 of the disclosure design, and no
+    window can close before February 2027.
     """
-    findings = [Finding.from_dict(record) for record in merged]
+    findings = [Finding.from_dict(record) for record in scan_findings]
     published, counts = split_for_publication(findings, disclosure_records, now=now)
     publishable = {finding.finding_id for finding in published}
 
@@ -276,7 +288,7 @@ def _publish(
                     now=now,
                 ),
             }
-            for record in merged
+            for record in scan_findings
             if record["finding_id"] in publishable
         ],
     )
@@ -353,9 +365,15 @@ def publish_from_history(
             "republished; run a scan instead"
         )
 
-    merged = load_previous(history_path)
+    scanned_at = _scan_stamp(summary_path)
+    if scanned_at is None:
+        raise ValueError(
+            f"{summary_path} carries no generated_at, so the scan it describes cannot "
+            "be told apart from older records in the history"
+        )
+    latest = seen_in(load_previous(history_path), scanned_at)
     published, counts = _publish(
-        merged,
+        latest,
         data_dir=write_dir,
         disclosure_records=disclosure_records,
         now=now,
@@ -367,7 +385,7 @@ def publish_from_history(
         counts,
         utc_stamp(now),
         tool_version,
-        merged,
+        latest,
     )
     return PublishResult(published=published, withheld=counts["withheld"] + counts["opted_out"])
 
@@ -378,7 +396,7 @@ def _stamp_publication(
     counts: Mapping[str, int],
     stamp: str,
     tool_version: str,
-    merged: Sequence[Mapping[str, Any]],
+    scan_findings: Sequence[Mapping[str, Any]],
 ) -> None:
     """Update the disclosure counts and date the publication, keeping the scan.
 
@@ -410,7 +428,7 @@ def _stamp_publication(
             # window closes keeps the per-rule totals current rather than
             # leaving the dashboard describing an older run.
             "found_by_rule": dict(
-                sorted(Counter(str(record["rule_id"]) for record in merged).items())
+                sorted(Counter(str(record["rule_id"]) for record in scan_findings).items())
             ),
         }
     )
@@ -428,7 +446,7 @@ def _write_summary(
     stamp: str,
     tool_version: str,
     intake: Intake,
-    merged: Sequence[Mapping[str, Any]],
+    scan_findings: Sequence[Mapping[str, Any]],
 ) -> None:
     """Publish the numbers even when the findings behind them are withheld.
 
@@ -453,7 +471,7 @@ def _write_summary(
         # rows of zeros, which reads as a scanner that finds nothing rather than
         # one whose findings are being withheld in full.
         "found_by_rule": dict(
-            sorted(Counter(str(record["rule_id"]) for record in merged).items())
+            sorted(Counter(str(record["rule_id"]) for record in scan_findings).items())
         ),
     }
     path.parent.mkdir(parents=True, exist_ok=True)

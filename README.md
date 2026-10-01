@@ -305,7 +305,6 @@ different experience from finding them contradicted.
 | **Maintainer notification** | No disclosure window has ever opened, so every high and critical finding is withheld indefinitely and the index shows one rule of five. | Designed, not built. Only findings a person has verified will be reported, privately and one server at a time, so unverified alerts never reach a maintainer as a vulnerability claim. |
 | **Triage wired into the pipeline** | Findings reach the report from the rules alone; no model adjudicates in a real run. | The adjudicators, cache and spend guard are built and tested. Wiring them in without labels would spend money on judgements nobody can score. |
 | **An accuracy gate in CI** | CI checks tests, lint and types, not precision. | A required check with nothing behind it blocks every pull request forever. It gets added when there is a baseline to compare against. |
-| **History between nights** | The nightly keeps nothing from one night to the next, so there is no time series yet and a disclosure window could never close. | The history holds withheld findings, so it has to be stored encrypted in a public repository. Designed, not built. |
 | **Python rules** | Four of five rules read TypeScript and JavaScript only. The character rule reads every language. | Rules are not translations of each other; the taint analysis differs per language. Stated per figure rather than averaged away. |
 
 ---
@@ -322,7 +321,7 @@ different experience from finding them contradicted.
 | SARIF output, disclosure gate | ✅ Done, enforced in code |
 | Public dashboard, deployed | ✅ [Live](https://manankumarthakkar.github.io/mcp-observatory/) |
 | Adjudicators, cache, spend guard, scoring script | ✅ Built, ⏳ not wired into a run |
-| Nightly scan, the only writer of the public site | ✅ Done. ⏳ Keeps no history yet, so no time series |
+| Nightly scan, the only writer of the public site | ✅ Done. A nightly series of counts since 2026-09-26, and the findings history kept between nights, encrypted, so a disclosure window can close |
 | Human labels, and the accuracy figure they produce | ⏳ 566 entries frozen, 116 queued, none labelled by a person |
 | Maintainer notification | ⏳ Designed, not built. Nothing above medium publishes without it |
 
