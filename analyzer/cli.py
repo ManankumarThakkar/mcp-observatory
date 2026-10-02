@@ -42,9 +42,11 @@ from analyzer.report.gate import DISCLOSURE_WINDOW, DisclosureRecord
 from analyzer.report.history_store import HistoryRefused, restore_history, save_history
 from analyzer.report.ledger import (
     WINDOW_CHANNELS,
+    Extension,
     LedgerRefused,
     Notice,
     OptOut,
+    Withdrawal,
     check_notice,
     disclosure_records,
     load_ledger,
@@ -242,6 +244,18 @@ def _build_parser() -> argparse.ArgumentParser:
     when = mark.add_mutually_exclusive_group(required=True)
     when.add_argument("--acknowledged-at")
     when.add_argument("--fixed-at")
+    withdraw = actions.add_parser(
+        "withdraw", help="Withdraw a finding: shown wrong by its maintainer, or ours to retract."
+    )
+    withdraw.add_argument("--finding", required=True)
+    withdraw.add_argument("--reason", required=True, choices=("disputed_and_wrong", "rule_change"))
+    withdraw.add_argument("--at", required=True, help="When it was decided, e.g. 2026-11-20T10:00:00Z.")
+    withdraw.add_argument("--note", default="")
+    extend = actions.add_parser("extend", help="Record more time agreed with a maintainer.")
+    extend.add_argument("--finding", required=True)
+    extend.add_argument("--until", required=True, help="The agreed end of the window.")
+    extend.add_argument("--agreed-at", required=True)
+    extend.add_argument("--note", default="")
     opt_out = actions.add_parser("opt-out", help="Record a maintainer's request to be excluded.")
     opt_out.add_argument("--server", required=True)
     opt_out.add_argument("--requested-at", required=True)
@@ -684,6 +698,27 @@ def _ledger_command(args: argparse.Namespace) -> int:
         else:
             changed = replace(matches[0], fixed_at=_when(args.fixed_at))
         entries = [changed if e is matches[0] else e for e in entries]
+    elif args.ledger_action in ("withdraw", "extend"):
+        finding = read_branch_history(repo, key=key).get(args.finding)
+        if finding is None:
+            raise LedgerRefused(f"{args.finding} is not in the history")
+        server_id = str(finding["server_id"])
+        if args.ledger_action == "withdraw":
+            entries = [
+                *entries,
+                Withdrawal(
+                    server_id=server_id, finding_id=args.finding, reason=args.reason,
+                    at=_when(args.at), note=args.note,
+                ),
+            ]
+        else:
+            entries = [
+                *entries,
+                Extension(
+                    server_id=server_id, finding_id=args.finding, until=_when(args.until),
+                    agreed_at=_when(args.agreed_at), note=args.note,
+                ),
+            ]
     else:
         entries = [*entries, OptOut(server_id=args.server, requested_at=_when(args.requested_at))]
 

@@ -120,3 +120,23 @@ def test_show_prints_counts_and_dates_but_no_server(
     closes = (SENT + DISCLOSURE_WINDOW).date().isoformat()
     assert closes in out, "the window closing date is what show is for"
     assert "acme/notes" not in out
+
+
+def test_a_withdrawal_and_an_extension_are_recorded_against_a_known_finding(repo: Path) -> None:
+    from analyzer.report.ledger import Extension, Withdrawal
+
+    when = utc_stamp(SENT)
+    later = utc_stamp(SENT + DISCLOSURE_WINDOW + timedelta(days=30))
+    assert main(["ledger", "withdraw", "--finding", FINDING.finding_id, "--reason", "disputed_and_wrong", "--at", when, "--note", "guarded upstream"]) == 0
+    assert main(["ledger", "extend", "--finding", FINDING.finding_id, "--until", later, "--agreed-at", when]) == 0
+    entries, _ = fetch_ledger(repo, key=KEY)
+    assert isinstance(entries[0], Withdrawal) and entries[0].server_id == "acme/notes"
+    assert isinstance(entries[1], Extension) and entries[1].finding_id == FINDING.finding_id
+
+
+def test_withdrawing_a_finding_not_in_the_history_is_refused(
+    repo: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert main(["ledger", "withdraw", "--finding", "no-such-finding", "--reason", "rule_change", "--at", utc_stamp(SENT)]) != 0
+    assert "not in the history" in capsys.readouterr().err
+    assert fetch_ledger(repo, key=KEY) == ([], None)
