@@ -213,8 +213,8 @@ can go.*
 | --- | ---: | ---: |
 | Every finding the rules report | 0.81 | 1.00 |
 | Only findings the rules call high confidence | 0.62 | 0.14 |
-| A calibrated judgement above 0.5 | 0.89 | 0.94 |
-| A calibrated judgement above 0.7 | 0.92 | 0.66 |
+| The judge's probability above 0.5 | 0.89 | 0.94 |
+| The judge's probability above 0.7 | 0.92 | 0.66 |
 
 > **Not reproducible from this repository.** The 43 labels were not retained.
 > The pilot predates `evals/golden/`, and its judgements existed only in the
@@ -264,6 +264,9 @@ too small to be worth a large model call each.
 
 The requirement, recorded as D12, is that whatever judges them returns a
 **calibrated probability**, and that the threshold applied to it is published.
+Whether a given judge meets that requirement is measured, not assumed, and it has
+not been measured yet: the probabilities above are used as scores, and calibration
+is tested on human labels in the pre-registered study (`docs/study/`, H4).
 A number that means what it says can be tuned and reported as precision and
 recall at the chosen cut-off. A verdict in prose carries no confidence anyone
 can inspect.

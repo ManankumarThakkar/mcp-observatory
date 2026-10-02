@@ -1,4 +1,4 @@
-"""Adjudicate a finding with a calibrated yes/no from a decision model."""
+"""Adjudicate a finding with a yes/no probability from a decision model."""
 
 import json
 import os
@@ -20,7 +20,7 @@ TOKEN_VARIABLE = "JEV_API_KEY"
 REQUEST_TIMEOUT_SECONDS = 30.0
 
 # The single question asked about every finding. A `noul` returns one
-# calibrated probability of one proposition, which is exactly what a published
+# probability of one proposition, which is exactly what a published
 # threshold applies to. A `choice` would return a distribution over labels we
 # invented, and recovering a probability from that is the parsing
 # `DECISIONS.md` D12 exists to avoid.
@@ -171,7 +171,7 @@ def post_json(
 
 
 class JevAdjudicator:
-    """A calibrated probability per finding, and what it cost to get.
+    """A probability per finding, and what it cost to get.
 
     `post` is injected for the reason every network boundary here is: a test
     of the adjudication logic should not need a network or a balance.
