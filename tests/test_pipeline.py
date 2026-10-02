@@ -373,3 +373,30 @@ def test_a_persisted_history_publishes_what_tonight_alone_would(tmp_path: Path) 
         )
 
     assert public(with_history) == public(fresh)
+
+
+def test_a_notified_finding_that_moved_line_still_publishes_when_its_window_closes(
+    tmp_path: Path,
+) -> None:
+    """A maintainer editing the file after a notice must not restart its clock."""
+
+    def at(line: int) -> ScanFn:
+        def scan(root: Path, server_id: str, commit_sha: str) -> ScanReport:
+            finding = Finding(
+                server_id=server_id, commit_sha=SHA, rule_id="UNICODE-CONCEAL", severity="critical",
+                confidence="high", location=Location(file="src/index.ts", line=line),
+                evidence="unicode-tag-block U+E0041",
+            )
+            return ScanReport(findings=(finding,), skipped=())
+
+        return scan
+
+    _run(tmp_path, [_record("a/one")], scan=at(1), now=NOW)
+    original = load_previous(tmp_path / "cache" / "history.jsonl")[0]["finding_id"]
+    later = NOW + DISCLOSURE_WINDOW + timedelta(days=2)
+    disclosure = {"a/one": DisclosureRecord("a/one", notified={original: NOW})}
+    _run(tmp_path, [_record("a/one")], scan=at(7), disclosure=disclosure, now=later)
+
+    published = load_previous(tmp_path / "data" / "findings.jsonl")
+    assert [p["location"]["line"] for p in published] == [7]
+    assert published[0]["disclosure_state"] == "disclosed"

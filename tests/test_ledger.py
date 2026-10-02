@@ -168,3 +168,17 @@ def test_the_ledger_round_trips_through_its_file(tmp_path: Path) -> None:
 def test_a_missing_ledger_means_nobody_has_been_notified(tmp_path: Path) -> None:
     # The safe direction: no notices, so every serious finding stays withheld.
     assert load_ledger(tmp_path / "absent.jsonl") == []
+
+
+def test_a_notice_follows_its_finding_to_a_new_line() -> None:
+    from analyzer.report.ledger import follow_moves
+
+    old, moved = _finding(1), _finding(9)
+    sent = NOW - DISCLOSURE_WINDOW - timedelta(days=1)
+    records = disclosure_records([_notice(old, notified_at=sent)])
+    history = [{**moved.to_dict(), "previous_ids": [old.finding_id]}]
+
+    carried = follow_moves(records, history)
+
+    assert carried["acme/notes"].notified[moved.finding_id] == sent
+    assert disclosure_state(moved, carried["acme/notes"], now=NOW) == "disclosed"
