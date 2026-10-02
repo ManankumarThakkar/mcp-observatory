@@ -5,8 +5,10 @@ import pytest
 
 from analyzer.models import Finding, Location, Severity
 from analyzer.report.gate import (
+    ALL_STATES,
     DISCLOSURE_WINDOW,
     GATED_SEVERITIES,
+    PUBLISHABLE_STATES,
     DisclosureRecord,
     disclosure_state,
     split_for_publication,
@@ -161,7 +163,7 @@ def test_only_disclosed_and_lesser_findings_reach_the_published_list() -> None:
     published, counts = split_for_publication(findings, records, now=NOW)
 
     assert [f.server_id for f in published] == ["b/disclosed", "d/lesser"]
-    assert counts == {"withheld": 2, "disclosed": 1, "opted_out": 1, "published": 1}
+    assert counts == {**dict.fromkeys(ALL_STATES, 0), "withheld": 2, "disclosed": 1, "opted_out": 1, "published": 1}
 
 
 def test_the_counts_publish_even_when_the_findings_do_not() -> None:
@@ -183,7 +185,7 @@ def test_an_empty_run_produces_empty_counts_for_every_state() -> None:
     published, counts = split_for_publication([], {}, now=NOW)
 
     assert published == []
-    assert counts == {"withheld": 0, "disclosed": 0, "opted_out": 0, "published": 0}
+    assert counts == dict.fromkeys(ALL_STATES, 0)
 
 
 def test_publication_order_follows_the_input() -> None:
@@ -218,3 +220,48 @@ def test_a_notice_opens_the_window_only_for_the_findings_it_names() -> None:
 
     assert disclosure_state(named, record, now=NOW) == "disclosed"
     assert disclosure_state(unnamed, record, now=NOW) == "withheld"
+
+
+# --- withdrawals and extensions --------------------------------------------------
+
+
+def test_a_withdrawn_serious_finding_is_never_published() -> None:
+    """A maintainer showed it was a false positive, so no window ever publishes it."""
+    record = _record(
+        notified={FINDING_ID: NOW - DISCLOSURE_WINDOW - timedelta(days=30)},
+        withdrawn=frozenset({FINDING_ID}),
+    )
+    assert disclosure_state(_finding("critical"), record, now=NOW) == "withdrawn"
+
+
+def test_a_published_finding_withdrawn_as_our_error_stays_visible_as_retracted() -> None:
+    # Manan's decision: keep it on the site, marked as our error.
+    record = _record(withdrawn=frozenset({_finding("medium").finding_id}))
+    state = disclosure_state(_finding("medium"), record, now=NOW)
+    assert state == "retracted"
+    assert state in PUBLISHABLE_STATES
+
+
+def test_an_extension_keeps_a_finding_withheld_until_the_agreed_date() -> None:
+    record = _record(
+        notified={FINDING_ID: NOW - DISCLOSURE_WINDOW - timedelta(days=1)},
+        extended={FINDING_ID: NOW + timedelta(days=10)},
+    )
+    assert disclosure_state(_finding("critical"), record, now=NOW) == "withheld"
+    assert disclosure_state(_finding("critical"), record, now=NOW + timedelta(days=11)) == "disclosed"
+
+
+def test_an_extension_can_never_shorten_the_window() -> None:
+    record = _record(
+        notified={FINDING_ID: NOW - timedelta(days=5)},
+        extended={FINDING_ID: NOW - timedelta(days=1)},
+    )
+    assert disclosure_state(_finding("critical"), record, now=NOW) == "withheld"
+
+
+def test_every_declared_state_is_counted() -> None:
+    from typing import get_args
+
+    from analyzer.report.gate import ALL_STATES, DisclosureState
+
+    assert set(ALL_STATES) == set(get_args(DisclosureState))
