@@ -12,6 +12,7 @@ from analyzer.crawler.registry import ServerRecord
 from analyzer.models import Finding
 from analyzer.orchestrator import CloneFn, ScanFn, ValidateFn, scan_all
 from analyzer.report.gate import DisclosureRecord, disclosure_state, split_for_publication
+from analyzer.report.ledger import follow_moves
 from analyzer.report.merge import (
     load_previous,
     merge_findings,
@@ -203,7 +204,7 @@ def run_pipeline(
     published_count, counts = _publish(
         tonight,
         data_dir=data_dir,
-        disclosure_records=disclosure_records,
+        disclosure_records=follow_moves(disclosure_records, tonight),
         now=now,
         tool_version=tool_version,
     )
@@ -375,7 +376,7 @@ def publish_from_history(
     published, counts = _publish(
         latest,
         data_dir=write_dir,
-        disclosure_records=disclosure_records,
+        disclosure_records=follow_moves(disclosure_records, latest),
         now=now,
         tool_version=tool_version,
     )

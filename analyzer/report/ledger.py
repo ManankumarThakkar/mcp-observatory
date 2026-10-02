@@ -189,3 +189,31 @@ def disclosure_records(entries: Sequence[Entry]) -> dict[str, DisclosureRecord]:
         )
         for server_id in notified.keys() | opted_out
     }
+
+
+def follow_moves(
+    records: Mapping[str, DisclosureRecord], history: Sequence[Mapping[str, Any]]
+) -> dict[str, DisclosureRecord]:
+    """Carry each notice to the id its finding has now, after the code moved.
+
+    A notice names the id a finding had when it was sent. If the maintainer then
+    edits the file above it, the finding is re-keyed and the merge records the
+    old id in `previous_ids`. Without this the old id would never publish and
+    the new one would never start a window. The earliest notice wins, as it
+    does for a finding named more than once.
+    """
+    carried = {server: dict(record.notified) for server, record in records.items()}
+    for finding in history:
+        dates = carried.get(str(finding["server_id"]))
+        if dates is None:
+            continue
+        sent = [dates[old] for old in finding.get("previous_ids", []) if old in dates]
+        current = str(finding["finding_id"])
+        if current in dates:
+            sent.append(dates[current])
+        if sent:
+            dates[current] = min(sent)
+    return {
+        server: DisclosureRecord(server_id=server, notified=carried[server], opted_out=record.opted_out)
+        for server, record in records.items()
+    }
