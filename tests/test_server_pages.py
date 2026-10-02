@@ -172,3 +172,15 @@ def test_a_refused_url_reads_as_unrecorded_rather_than_vanishing() -> None:
     html = render_server("x/y", SITE_WITH_GROUPS, repo_urls={"x/y": "javascript:alert(1)"})
 
     assert "not recorded" in html
+
+
+def test_a_server_page_says_when_a_finding_is_no_longer_seen_or_was_our_error() -> None:
+    groups = (
+        Decision("acme/one", "PATH-TRAVERSAL", "high", "reads any path", 1, ("a.ts:3",),
+                 "2026-09-23T00:00:00Z", "2026-12-01T00:00:00Z", "no longer seen since 2026-12-01"),
+        Decision("acme/one", "SCOPE-OVERBROAD", "medium", "listens on 0.0.0.0", 1, ("b.ts:4",),
+                 "2026-09-23T00:00:00Z", "2026-12-01T00:00:00Z", "withdrawn: our error"),
+    )
+    html = render_server("acme/one", SiteData(**{**SITE.__dict__, "groups": groups}), repo_urls=REPOS)
+    assert "no longer seen since 2026-12-01" in html
+    assert "withdrawn: our error" in html

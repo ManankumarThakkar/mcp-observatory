@@ -3,7 +3,7 @@
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
-from typing import Literal
+from typing import Literal, get_args
 
 from analyzer.models import Finding
 
@@ -16,15 +16,20 @@ DISCLOSURE_WINDOW = timedelta(days=90)
 # index most of what it reports.
 GATED_SEVERITIES = frozenset({"critical", "high"})
 
-DisclosureState = Literal["opted_out", "withheld", "disclosed", "published"]
+# "withdrawn": a serious finding shown to be wrong; never published.
+# "retracted": a finding already published, then withdrawn as our error; it stays
+# visible, marked, because an honest correction is what this project publishes.
+DisclosureState = Literal[
+    "opted_out", "withheld", "disclosed", "published", "withdrawn", "retracted"
+]
 
 # Every state, so a caller reading counts never has to guard a missing key.
-ALL_STATES: tuple[DisclosureState, ...] = ("withheld", "disclosed", "opted_out", "published")
+ALL_STATES: tuple[DisclosureState, ...] = get_args(DisclosureState)
 
 # The two states whose findings may be written in a publishable form. Named
 # rather than inlined so the one place that decides publication is greppable,
 # and so adding a state cannot accidentally make it publishable by default.
-PUBLISHABLE_STATES = frozenset({"disclosed", "published"})
+PUBLISHABLE_STATES = frozenset({"disclosed", "published", "retracted"})
 
 
 @dataclass(frozen=True)
@@ -42,6 +47,11 @@ class DisclosureRecord:
     server_id: str
     notified: Mapping[str, datetime] = field(default_factory=dict)
     opted_out: bool = False
+    # Findings withdrawn: disputed and shown wrong, or ours to retract.
+    withdrawn: frozenset[str] = frozenset()
+    # A later end agreed with the maintainer, per finding. It can only lengthen
+    # a window, never shorten one.
+    extended: Mapping[str, datetime] = field(default_factory=dict)
 
 
 def _require_aware(moment: datetime, field: str) -> None:
@@ -58,7 +68,7 @@ def _require_aware(moment: datetime, field: str) -> None:
 def disclosure_state(
     finding: Finding, record: DisclosureRecord | None, *, now: datetime
 ) -> DisclosureState:
-    """Which of the four states this finding is in.
+    """Which state this finding is in.
 
     Spec section 11 requires this to be code rather than convention: a finding
     cannot reach a publishable state without passing through here.
@@ -76,7 +86,11 @@ def disclosure_state(
     if record is not None and record.opted_out:
         return "opted_out"
 
-    if finding.severity not in GATED_SEVERITIES:
+    gated = finding.severity in GATED_SEVERITIES
+    if record is not None and finding.finding_id in record.withdrawn:
+        return "withdrawn" if gated else "retracted"
+
+    if not gated:
         return "published"
 
     notified_at = record.notified.get(finding.finding_id) if record is not None else None
@@ -84,11 +98,16 @@ def disclosure_state(
         return "withheld"
 
     _require_aware(notified_at, "notified_at")
+    window_ends = notified_at + DISCLOSURE_WINDOW
+    extension = record.extended.get(finding.finding_id) if record is not None else None
+    if extension is not None:
+        _require_aware(extension, "extended")
+        window_ends = max(window_ends, extension)
 
     # Strictly greater than, so the boundary is not a publication. An
     # off-by-one here publishes a day early, which is the only direction this
     # gate must never be wrong in. A future timestamp fails the same test.
-    if now - notified_at > DISCLOSURE_WINDOW:
+    if now > window_ends:
         return "disclosed"
     return "withheld"
 

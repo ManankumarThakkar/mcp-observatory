@@ -182,3 +182,66 @@ def test_a_notice_follows_its_finding_to_a_new_line() -> None:
 
     assert carried["acme/notes"].notified[moved.finding_id] == sent
     assert disclosure_state(moved, carried["acme/notes"], now=NOW) == "disclosed"
+
+
+# --- withdrawals and extensions --------------------------------------------------
+
+
+def test_a_withdrawal_and_an_extension_reach_the_gate() -> None:
+    from analyzer.report.ledger import Extension, Withdrawal
+
+    named, wrong = _finding(1), _finding(2)
+    sent = NOW - DISCLOSURE_WINDOW - timedelta(days=1)
+    records = disclosure_records(
+        [
+            _notice(named, wrong, notified_at=sent),
+            Withdrawal(server_id="acme/notes", finding_id=wrong.finding_id,
+                       reason="disputed_and_wrong", at=NOW - timedelta(days=5), note=""),
+            Extension(server_id="acme/notes", finding_id=named.finding_id,
+                      until=NOW + timedelta(days=14), agreed_at=NOW - timedelta(days=5), note=""),
+        ]
+    )
+    record = records["acme/notes"]
+    assert disclosure_state(wrong, record, now=NOW) == "withdrawn"
+    assert disclosure_state(named, record, now=NOW) == "withheld"
+    assert disclosure_state(named, record, now=NOW + timedelta(days=15)) == "disclosed"
+
+
+def test_an_unknown_withdrawal_reason_is_refused() -> None:
+    from analyzer.report.ledger import Withdrawal
+
+    with pytest.raises(ValueError, match="reason"):
+        Withdrawal(server_id="acme/notes", finding_id="f", reason="changed my mind", at=NOW, note="")  # type: ignore[arg-type]
+
+
+def test_withdrawals_and_extensions_round_trip_through_the_file(tmp_path: Path) -> None:
+    from analyzer.report.ledger import Extension, Withdrawal
+
+    entries: list[Any] = [
+        Withdrawal(server_id="a/b", finding_id="f-1", reason="rule_change", at=NOW, note="rule fix"),
+        Extension(server_id="a/b", finding_id="f-2", until=NOW + timedelta(days=30), agreed_at=NOW, note=""),
+    ]
+    write_ledger(tmp_path / "l.jsonl", entries)
+    assert load_ledger(tmp_path / "l.jsonl") == entries
+
+
+def test_a_withdrawal_and_an_extension_follow_a_moved_finding() -> None:
+    from analyzer.report.ledger import Extension, Withdrawal, follow_moves
+
+    old, moved = _finding(1), _finding(9)
+    other_old, other_moved = _finding(2), _finding(8)
+    records = disclosure_records(
+        [
+            _notice(old, other_old, notified_at=NOW - DISCLOSURE_WINDOW - timedelta(days=1)),
+            Withdrawal(server_id="acme/notes", finding_id=old.finding_id, reason="disputed_and_wrong", at=NOW, note=""),
+            Extension(server_id="acme/notes", finding_id=other_old.finding_id,
+                      until=NOW + timedelta(days=14), agreed_at=NOW, note=""),
+        ]
+    )
+    history = [
+        {**moved.to_dict(), "previous_ids": [old.finding_id]},
+        {**other_moved.to_dict(), "previous_ids": [other_old.finding_id]},
+    ]
+    carried = follow_moves(records, history)["acme/notes"]
+    assert disclosure_state(moved, carried, now=NOW) == "withdrawn"
+    assert disclosure_state(other_moved, carried, now=NOW) == "withheld"

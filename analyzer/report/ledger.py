@@ -5,7 +5,7 @@ about what a notice may record lives here, next to the record itself.
 """
 
 import json
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from collections.abc import Set as AbstractSet
 from dataclasses import dataclass
 from datetime import datetime
@@ -94,10 +94,90 @@ class OptOut:
         }
 
 
-Entry = Notice | OptOut
+WithdrawalReason = Literal["disputed_and_wrong", "rule_change"]
+
+
+@dataclass(frozen=True)
+class Withdrawal:
+    """A finding taken back: a maintainer showed it wrong, or a rule fix showed it ours.
+
+    A withheld finding withdrawn is never published. One already published stays
+    visible, marked as our error.
+    """
+
+    server_id: str
+    finding_id: str
+    reason: WithdrawalReason
+    at: datetime
+    note: str
+
+    def __post_init__(self) -> None:
+        if self.reason not in get_args(WithdrawalReason):
+            raise ValueError(f"reason must be one of {', '.join(get_args(WithdrawalReason))}")
+        _aware(self.at, "at")
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "kind": "withdrawal",
+            "server_id": self.server_id,
+            "finding_id": self.finding_id,
+            "reason": self.reason,
+            "at": utc_stamp(self.at),
+            "note": self.note,
+        }
+
+
+@dataclass(frozen=True)
+class Extension:
+    """More time agreed with a maintainer for one finding. It never shortens a window."""
+
+    server_id: str
+    finding_id: str
+    until: datetime
+    agreed_at: datetime
+    note: str
+
+    def __post_init__(self) -> None:
+        _aware(self.until, "until")
+        _aware(self.agreed_at, "agreed_at")
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "kind": "extension",
+            "server_id": self.server_id,
+            "finding_id": self.finding_id,
+            "until": utc_stamp(self.until),
+            "agreed_at": utc_stamp(self.agreed_at),
+            "note": self.note,
+        }
+
+
+Entry = Notice | OptOut | Withdrawal | Extension
+
+
+def _when(record: Mapping[str, Any], name: str) -> datetime:
+    moment = _parse(record[name])
+    assert moment is not None
+    return moment
 
 
 def _from_dict(record: Mapping[str, Any]) -> Entry:
+    if record["kind"] == "withdrawal":
+        return Withdrawal(
+            server_id=str(record["server_id"]),
+            finding_id=str(record["finding_id"]),
+            reason=record["reason"],
+            at=_when(record, "at"),
+            note=str(record.get("note", "")),
+        )
+    if record["kind"] == "extension":
+        return Extension(
+            server_id=str(record["server_id"]),
+            finding_id=str(record["finding_id"]),
+            until=_when(record, "until"),
+            agreed_at=_when(record, "agreed_at"),
+            note=str(record.get("note", "")),
+        )
     if record["kind"] == "opt_out":
         requested = _parse(record["requested_at"])
         assert requested is not None
@@ -168,52 +248,81 @@ def check_notice(
 
 
 def disclosure_records(entries: Sequence[Entry]) -> dict[str, DisclosureRecord]:
-    """What the gate needs: each finding's earliest window-opening notice, and opt-outs."""
+    """What the gate needs: notices, withdrawals, extensions and opt-outs, by server.
+
+    The earliest window-opening notice names a finding's start, and the latest
+    extension its end; a withdrawal holds for good.
+    """
     notified: dict[str, dict[str, datetime]] = {}
+    withdrawn: dict[str, set[str]] = {}
+    extended: dict[str, dict[str, datetime]] = {}
     opted_out: set[str] = set()
     for entry in entries:
         if isinstance(entry, OptOut):
             opted_out.add(entry.server_id)
-            continue
-        if entry.channel not in WINDOW_CHANNELS:
-            continue
-        dates = notified.setdefault(entry.server_id, {})
-        for finding_id in entry.finding_ids:
-            if finding_id not in dates or entry.notified_at < dates[finding_id]:
-                dates[finding_id] = entry.notified_at
+        elif isinstance(entry, Withdrawal):
+            withdrawn.setdefault(entry.server_id, set()).add(entry.finding_id)
+        elif isinstance(entry, Extension):
+            ends = extended.setdefault(entry.server_id, {})
+            ends[entry.finding_id] = max(entry.until, ends.get(entry.finding_id, entry.until))
+        elif entry.channel in WINDOW_CHANNELS:
+            dates = notified.setdefault(entry.server_id, {})
+            for finding_id in entry.finding_ids:
+                if finding_id not in dates or entry.notified_at < dates[finding_id]:
+                    dates[finding_id] = entry.notified_at
+    servers = notified.keys() | withdrawn.keys() | extended.keys() | opted_out
     return {
         server_id: DisclosureRecord(
             server_id=server_id,
             notified=notified.get(server_id, {}),
             opted_out=server_id in opted_out,
+            withdrawn=frozenset(withdrawn.get(server_id, set())),
+            extended=extended.get(server_id, {}),
         )
-        for server_id in notified.keys() | opted_out
+        for server_id in servers
     }
+
+
+def _follow(
+    by_id: Mapping[str, datetime],
+    history: Sequence[Mapping[str, Any]],
+    pick: Callable[[list[datetime]], datetime],
+) -> dict[str, datetime]:
+    """Carry dates keyed by finding id to each finding's current id, choosing with `pick`."""
+    carried = dict(by_id)
+    for finding in history:
+        found = [carried[old] for old in finding.get("previous_ids", []) if old in carried]
+        current = str(finding["finding_id"])
+        if current in carried:
+            found.append(carried[current])
+        if found:
+            carried[current] = pick(found)
+    return carried
 
 
 def follow_moves(
     records: Mapping[str, DisclosureRecord], history: Sequence[Mapping[str, Any]]
 ) -> dict[str, DisclosureRecord]:
-    """Carry each notice to the id its finding has now, after the code moved.
+    """Carry notices, withdrawals and extensions to the id each finding has now.
 
-    A notice names the id a finding had when it was sent. If the maintainer then
-    edits the file above it, the finding is re-keyed and the merge records the
-    old id in `previous_ids`. Without this the old id would never publish and
-    the new one would never start a window. The earliest notice wins, as it
-    does for a finding named more than once.
+    A ledger entry names the id a finding had when it was written. If the
+    maintainer then edits the file above it, the finding is re-keyed and the
+    merge records the old id in `previous_ids`. Without this a notice would
+    never complete, a withdrawal would stop protecting the finding, and an
+    extension would be lost. The earliest notice and the latest extension win.
     """
-    carried = {server: dict(record.notified) for server, record in records.items()}
-    for finding in history:
-        dates = carried.get(str(finding["server_id"]))
-        if dates is None:
-            continue
-        sent = [dates[old] for old in finding.get("previous_ids", []) if old in dates]
-        current = str(finding["finding_id"])
-        if current in dates:
-            sent.append(dates[current])
-        if sent:
-            dates[current] = min(sent)
-    return {
-        server: DisclosureRecord(server_id=server, notified=carried[server], opted_out=record.opted_out)
-        for server, record in records.items()
-    }
+    result: dict[str, DisclosureRecord] = {}
+    for server, record in records.items():
+        mine = [f for f in history if str(f["server_id"]) == server]
+        withdrawn = set(record.withdrawn)
+        for finding in mine:
+            if withdrawn & set(finding.get("previous_ids", [])):
+                withdrawn.add(str(finding["finding_id"]))
+        result[server] = DisclosureRecord(
+            server_id=server,
+            notified=_follow(record.notified, mine, min),
+            opted_out=record.opted_out,
+            withdrawn=frozenset(withdrawn),
+            extended=_follow(record.extended, mine, max),
+        )
+    return result
