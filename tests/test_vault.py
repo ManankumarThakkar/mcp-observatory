@@ -171,3 +171,22 @@ def test_a_history_that_was_never_encrypted_is_refused(tmp_path: Path) -> None:
     with pytest.raises(VaultError, match="not decrypted"):
         unseal(sealed, opened, KEY)
     assert list(opened.parent.iterdir()) == []
+
+
+def test_a_partial_file_gpg_leaves_behind_is_swept_up(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Measured on gpg 2.5: it writes to "<output>.part" and renames at the end,
+    # and on some failures leaves the .part file - partial plaintext of the
+    # confidential history - beside the target.
+    def gpg_that_leaves_a_part_file(arguments: list[str], passphrase: str) -> list[str]:
+        output = Path(arguments[arguments.index("--output") + 1])
+        output.with_name(output.name + ".part").write_text("partial plaintext\n", encoding="utf-8")
+        raise VaultError("gpg exited 2: decompression failed")
+
+    monkeypatch.setattr(vault, "_gpg", gpg_that_leaves_a_part_file)
+    opened = tmp_path / "out" / "history.jsonl"
+    opened.parent.mkdir()
+    with pytest.raises(VaultError):
+        unseal(tmp_path / "history.jsonl.gpg", opened, KEY)
+    assert list(opened.parent.iterdir()) == []

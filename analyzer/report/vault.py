@@ -19,6 +19,8 @@ import os
 import shutil
 import subprocess
 import tempfile
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 
 GPG_TIMEOUT_SECONDS = 120
@@ -109,25 +111,32 @@ def _sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def _temporary_beside(path: Path) -> Path:
-    """A fresh name in the destination's directory, so the final rename is atomic."""
+@contextmanager
+def _staging_beside(path: Path) -> Iterator[Path]:
+    """A private directory next to `path`, removed whole afterwards.
+
+    Beside the destination so the final rename stays on one filesystem and is
+    atomic. Removed whole, not file by file, because gpg leaves files of its
+    own: measured on 2.5, it writes to "<output>.part" and on some failures
+    leaves that partial plaintext behind. Deleting only the names this module
+    chose missed it.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
-    handle, name = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
-    os.close(handle)
-    os.unlink(name)
-    return Path(name)
+    stage = Path(tempfile.mkdtemp(prefix=f".{path.name}.", dir=path.parent))
+    try:
+        yield stage
+    finally:
+        shutil.rmtree(stage, ignore_errors=True)
 
 
 def unseal(sealed: Path, plaintext: Path, passphrase: str) -> None:
     """Decrypt `sealed` into `plaintext`, or raise and leave `plaintext` untouched."""
     _check_key(passphrase)
-    staged = _temporary_beside(plaintext)
-    try:
+    with _staging_beside(plaintext) as stage:
+        staged = stage / plaintext.name
         status = _gpg(["--decrypt", "--output", str(staged), str(sealed)], passphrase)
         _require_decrypted(status)
         os.replace(staged, plaintext)
-    finally:
-        staged.unlink(missing_ok=True)
 
 
 def seal(plaintext: Path, sealed: Path, passphrase: str) -> None:
@@ -137,9 +146,8 @@ def seal(plaintext: Path, sealed: Path, passphrase: str) -> None:
     tonight's history still exists, rather than tomorrow as a lost history.
     """
     _check_key(passphrase)
-    staged = _temporary_beside(sealed)
-    check = _temporary_beside(plaintext)
-    try:
+    with _staging_beside(sealed) as stage:
+        staged, check = stage / sealed.name, stage / "check"
         _gpg(
             ["--symmetric", "--cipher-algo", "AES256", "--output", str(staged), str(plaintext)],
             passphrase,
@@ -148,6 +156,3 @@ def seal(plaintext: Path, sealed: Path, passphrase: str) -> None:
         if _sha256(check) != _sha256(plaintext):
             raise VaultError(f"the sealed history does not open to {plaintext.name}")
         os.replace(staged, sealed)
-    finally:
-        staged.unlink(missing_ok=True)
-        check.unlink(missing_ok=True)
