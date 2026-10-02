@@ -29,6 +29,7 @@ from evals.golden.study import STUDY_SEED, check_frozen, probability_digest
 from evals.harness.analysis import flip_estimate
 from evals.harness.arms import ARMS, adjudicator_for
 from evals.harness.experiment import eligible, verdict
+from evals.harness.retest import retest_stability
 from evals.harness.stats import cohens_kappa, sign_test
 
 Entry = Mapping[str, Any]
@@ -88,6 +89,31 @@ def judge(
         if len(answer) == len(CONDITIONS):
             judged.answers[str(entry["entry_id"])] = answer
     return judged
+
+
+def _as_entries(path: Path) -> dict[str, dict[str, float]]:
+    """An arm's stored answers, keyed by entry."""
+    rows = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    return {str(r["entry_id"]): {c: float(r[c]) for c in CONDITIONS} for r in rows}
+
+
+def retest_lines(
+    first: Mapping[str, Mapping[str, float]], second: Mapping[str, Mapping[str, float]]
+) -> list[str]:
+    """How often identical input got a different verdict: the judge's own noise floor.
+
+    Reuses the measure applied to the first judge (R0), so the two noise
+    floors are computed the same way.
+    """
+    def entries(answers: Mapping[str, Mapping[str, float]]) -> list[dict[str, Any]]:
+        return [{"entry_id": e, "probabilities": dict(p)} for e, p in answers.items()]
+
+    stability = retest_stability(entries(first), entries(second))
+    return [
+        f"retest {condition}: {s.verdict_changes} of {s.n} verdicts changed on identical input, "
+        f"median shift {s.median_shift:.3f}, largest {s.max_shift:.3f}"
+        for condition, s in stability.items()
+    ]
 
 
 def failure_lines(failures: Mapping[str, str]) -> list[str]:
@@ -173,6 +199,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--sample", type=int, help="Judge this many findings to measure the cost.")
     mode.add_argument("--max-cost", type=float, help="Run in full, stopping at this many dollars.")
+    parser.add_argument(
+        "--retest",
+        action="store_true",
+        help="Ask every question again with a fresh cache, to measure the judge's own noise.",
+    )
     args = parser.parse_args(argv)
 
     entries: list[dict[str, Any]] = [
@@ -188,7 +219,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     args.out.mkdir(parents=True, exist_ok=True)
     measured = args.out / f"{args.arm}.sample.json"
     pool = paired(entries)
-    cache_path = args.out / f"{args.arm}.cache.jsonl"
+    # A retest gets its own cache and its own results. Reading the first run's
+    # cache would answer every question from memory and measure no noise at all.
+    suffix = ".retest" if args.retest else ""
+    cache_path = args.out / f"{args.arm}{suffix}.cache.jsonl"
+    first_run = args.out / f"{args.arm}.jsonl"
+    if args.retest and not first_run.exists():
+        raise RuntimeError(f"a retest compares against the first run, and there is none at {first_run}")
 
     if args.sample is not None:
         chosen = set(sample_ids(entries, args.sample))
@@ -218,7 +255,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             f"the full run is projected at ${projected:.2f}, above the cap of ${args.max_cost:.2f}"
         )
     judged = judge(pool, adjudicator=adjudicator_for(args.arm), cache_path=cache_path, max_cost=args.max_cost)
-    (args.out / f"{args.arm}.jsonl").write_text(
+    (args.out / f"{args.arm}{suffix}.jsonl").write_text(
         "".join(
             json.dumps({"entry_id": entry_id, **answer}, sort_keys=True) + "\n"
             for entry_id, answer in sorted(judged.answers.items())
@@ -227,6 +264,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     print(f"{judged.calls} calls, ${judged.cost_usd:.4f}" + (" (stopped at the cap)" if judged.stopped_at_cap else ""))
     for line in failure_lines(judged.failures):
         print(line)
+    if args.retest:
+        for line in retest_lines(_as_entries(first_run), judged.answers):
+            print(line)
+        return 0
     for line in summary_lines(entries, judged.answers, arm=args.arm, seed=STUDY_SEED):
         print(line)
     return 0
