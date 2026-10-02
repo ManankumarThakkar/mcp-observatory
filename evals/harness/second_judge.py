@@ -13,7 +13,9 @@ refused if that measurement projects past it.
 
 import argparse
 import json
+import re
 import statistics
+from collections import Counter
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -38,6 +40,9 @@ class Judged:
     cost_usd: float = 0.0
     calls: int = 0
     stopped_at_cap: bool = False
+    # "<entry_id>:<condition>" to the reason, so a refusal (which repeats) can be
+    # told from a dropped connection (which does not).
+    failures: dict[str, str] = field(default_factory=dict)
 
 
 def paired(entries: Sequence[Entry]) -> list[Entry]:
@@ -75,12 +80,24 @@ def judge(
             )
             judged.cost_usd += run.cost_usd
             judged.calls += run.calls
+            for entry_id, reason in run.failures.items():
+                judged.failures[f"{entry_id}:{condition}"] = reason
             decision = run.decisions.get(str(entry["entry_id"]))
             if decision is not None:
                 answer[condition] = decision.probability
         if len(answer) == len(CONDITIONS):
             judged.answers[str(entry["entry_id"])] = answer
     return judged
+
+
+def failure_lines(failures: Mapping[str, str]) -> list[str]:
+    """Failed calls counted by reason, with finding ids masked so reasons group."""
+    if not failures:
+        return []
+    reasons = Counter(re.sub(r"g-\d+", "<entry>", reason)[:160] for reason in failures.values())
+    return [f"{len(failures)} calls failed and can be re-run:"] + [
+        f"  {count} x {reason}" for reason, count in reasons.most_common()
+    ]
 
 
 def shift_line(label: str, pairs: Sequence[tuple[float, float]]) -> str:
@@ -182,6 +199,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             max_cost=float("inf"),
         )
         measured.write_text(json.dumps({"calls": judged.calls, "cost_usd": judged.cost_usd}) + "\n")
+        for line in failure_lines(judged.failures):
+            print(line)
         per_call = judged.cost_usd / judged.calls if judged.calls else 0.0
         print(
             f"sample: {judged.calls} calls, ${judged.cost_usd:.4f}; full run of "
@@ -206,6 +225,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
     )
     print(f"{judged.calls} calls, ${judged.cost_usd:.4f}" + (" (stopped at the cap)" if judged.stopped_at_cap else ""))
+    for line in failure_lines(judged.failures):
+        print(line)
     for line in summary_lines(entries, judged.answers, arm=args.arm, seed=STUDY_SEED):
         print(line)
     return 0

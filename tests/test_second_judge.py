@@ -159,3 +159,23 @@ def test_the_summary_also_measures_movement_without_a_threshold() -> None:
     assert "0 higher" in shift
     assert "median shift -0.20" in shift
     assert any(line.strip().startswith("first judge, same findings:") for line in lines)
+
+
+class FailingJudge(FixedJudge):
+    """Refuses one finding, as a model may."""
+
+    def decide(self, entry: Mapping[str, Any]) -> Decision:
+        if "read(p1)" in str(entry["context"]):
+            raise ValueError(f"the model refused to answer for {entry['entry_id']}")
+        return super().decide(entry)
+
+
+def test_a_failed_call_is_reported_with_its_reason_not_dropped(tmp_path: Path) -> None:
+    # A refusal repeats on every retry and a network blip does not, so the
+    # reason decides what to do next; dropping it hides which happened.
+    results = judge([_entry(1), _entry(2)], adjudicator=FailingJudge(), cache_path=tmp_path / "c.jsonl", max_cost=1.0)
+    assert "g-1" not in results.answers
+    assert list(results.failures.values()) == [
+        "ValueError: the model refused to answer for g-1",
+        "ValueError: the model refused to answer for g-1",
+    ]
