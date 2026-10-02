@@ -231,3 +231,23 @@ def test_a_finding_no_longer_seen_is_shown_but_not_counted_as_found(tmp_path: Pa
 def test_a_retracted_finding_is_marked_as_our_error(tmp_path: Path) -> None:
     site = build_site_data(_write(tmp_path, [_published(disclosure_state="retracted")]))
     assert [g.status for g in site.groups] == ["withdrawn: our error"]
+
+
+def test_a_retracted_finding_is_counted_apart_not_as_found(tmp_path: Path) -> None:
+    # A known error is not a finding, as a withdrawn serious one is not.
+    site = build_site_data(_write(tmp_path, [_published(), _published(finding_id="f9", evidence="other", disclosure_state="retracted")]))
+    assert (site.findings_published, site.findings_found, site.decisions_published) == (1, 964, 1)
+    assert site.retracted == 1
+
+
+def test_findings_no_longer_current_never_inflate_decision_counts(tmp_path: Path) -> None:
+    """Review of #66: a retracted finding that was also no longer seen was
+    recognised by its status text, so it counted as a current decision."""
+    gone_and_retracted = _published(
+        finding_id="f2", evidence="reads any path", disclosure_state="retracted",
+        no_longer_seen_since="2026-12-01T03:10:00Z",
+    )
+    site = build_site_data(_write(tmp_path, [_published(), gone_and_retracted]))
+    scope = next(r for r in site.rules if r.rule_id == "SCOPE-OVERBROAD")
+    assert (site.findings_published, site.decisions_published) == (1, 1)
+    assert (scope.findings, scope.decisions) == (1, 1)

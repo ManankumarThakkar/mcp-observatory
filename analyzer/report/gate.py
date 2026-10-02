@@ -17,8 +17,10 @@ DISCLOSURE_WINDOW = timedelta(days=90)
 GATED_SEVERITIES = frozenset({"critical", "high"})
 
 # "withdrawn": a serious finding shown to be wrong; never published.
-# "retracted": a finding already published, then withdrawn as our error; it stays
-# visible, marked, because an honest correction is what this project publishes.
+# "retracted": a finding below the gated severities, which is therefore already
+# public, withdrawn as our error. It stays visible, marked, because an honest
+# correction is what this project publishes. Decided by severity, not by a record
+# of prior publication: anything below the gate is published the night it is found.
 DisclosureState = Literal[
     "opted_out", "withheld", "disclosed", "published", "withdrawn", "retracted"
 ]

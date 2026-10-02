@@ -260,8 +260,11 @@ def test_an_extension_can_never_shorten_the_window() -> None:
 
 
 def test_every_declared_state_is_counted() -> None:
+    """Checked through the counts a run produces, not by comparing ALL_STATES with
+    the definition it is derived from, which could never fail."""
     from typing import get_args
 
-    from analyzer.report.gate import ALL_STATES, DisclosureState
+    from analyzer.report.gate import DisclosureState
 
-    assert set(ALL_STATES) == set(get_args(DisclosureState))
+    _, counts = split_for_publication([], {}, now=NOW)
+    assert set(counts) == set(get_args(DisclosureState))
