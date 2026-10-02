@@ -6,7 +6,7 @@ import os
 import subprocess
 import sys
 import tempfile
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
@@ -36,12 +36,23 @@ from analyzer.pipeline import (
     publish_from_history,
     run_pipeline,
 )
+from analyzer.report.gate import DISCLOSURE_WINDOW, DisclosureRecord
 from analyzer.report.history_store import HistoryRefused, restore_history, save_history
+from analyzer.report.ledger import (
+    WINDOW_CHANNELS,
+    LedgerRefused,
+    Notice,
+    OptOut,
+    check_notice,
+    disclosure_records,
+    load_ledger,
+)
+from analyzer.report.ledger_store import fetch_ledger, publish_ledger, read_branch_history
 from analyzer.report.merge import utc_stamp
 from analyzer.report.page import write_site
 from analyzer.report.site import build_site_data, write_site_data
 from analyzer.report.trend import append_point, point_from_site
-from analyzer.report.vault import VaultError
+from analyzer.report.vault import VaultError, unseal
 from analyzer.scanner import scan_directory
 
 # A directory scanned in place was never cloned, so there is no commit to
@@ -96,6 +107,7 @@ DEFAULT_DATA_DIR = Path("data")
 # repository is public and a withheld finding written to a public file is a
 # disclosed one.
 DEFAULT_CACHE_DIR = Path(".cache")
+DEFAULT_LEDGER_PATH = DEFAULT_CACHE_DIR / "ledger.jsonl"
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -139,6 +151,11 @@ def _build_parser() -> argparse.ArgumentParser:
         default=str(DEFAULT_CACHE_DIR),
         help="Where the full history lives. Never published.",
     )
+    scan.add_argument(
+        "--ledger",
+        default=str(DEFAULT_LEDGER_PATH),
+        help="The opened disclosure ledger. Missing means nobody has been notified.",
+    )
 
     publish = subcommands.add_parser(
         "publish",
@@ -149,6 +166,11 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     publish.add_argument(
         "--cache-dir", default=str(DEFAULT_CACHE_DIR), help="Where the full history lives."
+    )
+    publish.add_argument(
+        "--ledger",
+        default=str(DEFAULT_LEDGER_PATH),
+        help="The opened disclosure ledger. Missing means nobody has been notified.",
     )
     publish.add_argument(
         "--dry-run",
@@ -193,6 +215,39 @@ def _build_parser() -> argparse.ArgumentParser:
         "--bootstrap",
         action="store_true",
         help="Start from no history. First night only; refused if a sealed history exists.",
+    )
+
+    ledger = subcommands.add_parser(
+        "ledger",
+        help="Record notices to maintainers on the sealed disclosure ledger. Local only.",
+    )
+    actions = ledger.add_subparsers(dest="ledger_action", required=True)
+    add = actions.add_parser("add", help="Record one notice, naming the findings it described.")
+    add.add_argument("--server", required=True)
+    add.add_argument("--finding", action="append", required=True, help="Repeat for each finding.")
+    add.add_argument(
+        "--channel", required=True, choices=("private_advisory", "security_contact", "contact_request")
+    )
+    add.add_argument("--notified-at", required=True, help="When it was sent, e.g. 2026-11-01T10:00:00Z.")
+    add.add_argument("--reference", required=True, help="The advisory URL, or 'email'.")
+    add.add_argument("--annotator", required=True, help="Whose labels verify the findings.")
+    add.add_argument(
+        "--entries", default=".cache/golden-entries.jsonl", help="Maps labelled entries to findings."
+    )
+    mark = actions.add_parser("mark", help="Record that a notice was acknowledged or fixed.")
+    mark.add_argument("--notice", required=True, help="As `ledger show --ids` prints it.")
+    when = mark.add_mutually_exclusive_group(required=True)
+    when.add_argument("--acknowledged-at")
+    when.add_argument("--fixed-at")
+    opt_out = actions.add_parser("opt-out", help="Record a maintainer's request to be excluded.")
+    opt_out.add_argument("--server", required=True)
+    opt_out.add_argument("--requested-at", required=True)
+    opened = actions.add_parser("open", help="Open a sealed ledger for the nightly's gate.")
+    opened.add_argument("--sealed", required=True)
+    opened.add_argument("--out", required=True)
+    show = actions.add_parser("show", help="Counts and window dates. Names no server.")
+    show.add_argument(
+        "--ids", action="store_true", help="Also print notice ids, which name servers."
     )
 
     crawl = subcommands.add_parser(
@@ -369,6 +424,7 @@ def run_index_scan(
     cache_dir: Path,
     sample: int | None = None,
     seed: int = DEFAULT_SAMPLE_SEED,
+    disclosure_records: Mapping[str, DisclosureRecord],
     clone: CloneFn = shallow_clone,
     scan: ScanFn = scan_directory,
     now: Callable[[], datetime] = lambda: datetime.now(UTC),
@@ -406,7 +462,7 @@ def run_index_scan(
             workdir=Path(workdir),
             data_dir=data_dir,
             cache_dir=cache_dir,
-            disclosure_records={},
+            disclosure_records=disclosure_records,
             now=now(),
             tool_version=__version__,
         )
@@ -420,6 +476,7 @@ def _scan_index(args: argparse.Namespace) -> int:
         cache_dir=Path(args.cache_dir),
         sample=args.sample,
         seed=args.seed,
+        disclosure_records=disclosure_from_ledger(Path(args.ledger)),
     )
 
     drawn = f" (sample of {args.sample}, seed {args.seed})" if args.sample else ""
@@ -454,7 +511,7 @@ def _publish_command(args: argparse.Namespace) -> int:
                 # dry run raised instead of reporting.
                 data_dir=data_dir,
                 destination=Path(scratch),
-                disclosure_records={},
+                disclosure_records=disclosure_from_ledger(Path(args.ledger)),
                 now=datetime.now(UTC),
                 tool_version=__version__,
             )
@@ -468,7 +525,7 @@ def _publish_command(args: argparse.Namespace) -> int:
     result = publish_from_history(
         cache_dir=cache_dir,
         data_dir=data_dir,
-        disclosure_records={},
+        disclosure_records=disclosure_from_ledger(Path(args.ledger)),
         now=datetime.now(UTC),
         tool_version=__version__,
     )
@@ -517,6 +574,109 @@ def _history_command(args: argparse.Namespace) -> int:
             bootstrap=args.bootstrap,
         )
     )
+    return 0
+
+
+def _when(stamp: str) -> datetime:
+    moment = datetime.fromisoformat(stamp)
+    if moment.tzinfo is None:
+        raise InputError(f"{stamp} needs a timezone, such as a trailing Z")
+    return moment
+
+
+def disclosure_from_ledger(path: Path) -> dict[str, DisclosureRecord]:
+    """The gate's records from an opened ledger; none when there is no ledger yet."""
+    return disclosure_records(load_ledger(path))
+
+
+def _ledger_command(args: argparse.Namespace) -> int:
+    """Read, change and push the sealed ledger. Run on the maintainer's machine only.
+
+    The key comes from HISTORY_KEY, as for the history. Nothing here prints a
+    server name unless asked, because this output is often read with others.
+    """
+    key = os.environ.get("HISTORY_KEY", "")
+    if not key:
+        raise InputError("HISTORY_KEY is not set")
+
+    if args.ledger_action == "open":
+        # For the nightly, in its own step so the scan never holds the key. No
+        # ledger yet is a valid state - nobody has been notified - and leaves
+        # every serious finding withheld. A ledger that fails to open raises.
+        out = Path(args.out)
+        if Path(args.sealed).exists():
+            unseal(Path(args.sealed), out, key)
+            print(f"opened the ledger into {out}")
+        else:
+            out.parent.mkdir(parents=True, exist_ok=True)
+            out.write_text("", encoding="utf-8")
+            print("no ledger yet; nobody has been notified")
+        return 0
+
+    repo = Path()
+    entries, parent = fetch_ledger(repo, key=key)
+    now = datetime.now(UTC)
+
+    if args.ledger_action == "show":
+        notices = [e for e in entries if isinstance(e, Notice)]
+        opening = sorted(
+            n.notified_at + DISCLOSURE_WINDOW for n in notices if n.channel in WINDOW_CHANNELS
+        )
+        print(
+            f"{len(notices)} notice{'s' * (len(notices) != 1)}, "
+            f"{sum(len(n.finding_ids) for n in notices)} findings named, "
+            f"{sum(1 for e in entries if isinstance(e, OptOut))} opt-outs, "
+            f"{sum(1 for n in notices if n.acknowledged_at)} acknowledged, "
+            f"{sum(1 for n in notices if n.fixed_at)} fixed"
+        )
+        upcoming = [moment for moment in opening if moment > now]
+        if upcoming:
+            print(f"next window closes {upcoming[0].date().isoformat()}; last {upcoming[-1].date().isoformat()}")
+        if args.ids:
+            for notice in notices:
+                print(notice.notice_id)
+        return 0
+
+    if args.ledger_action == "add":
+        # The one place the analyzer reads evaluation code: the policy notifies
+        # only findings a person verified, and the labels live there.
+        from evals.golden.annotate import annotation_paths
+        from evals.golden.verified import human_true_positives
+
+        golden = [
+            json.loads(line)
+            for line in Path(args.entries).read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+        notice = Notice(
+            server_id=args.server,
+            finding_ids=tuple(args.finding),
+            channel=args.channel,
+            notified_at=_when(args.notified_at),
+            reference=args.reference,
+            verified_by=args.annotator,
+        )
+        check_notice(
+            notice,
+            history=read_branch_history(repo, key=key),
+            verified=human_true_positives(annotation_paths(args.annotator)[1], golden),
+            now=now,
+        )
+        entries = [*entries, notice]
+    elif args.ledger_action == "mark":
+        matches = [e for e in entries if isinstance(e, Notice) and e.notice_id == args.notice]
+        if len(matches) != 1:
+            raise InputError(f"no notice {args.notice} on the ledger")
+        if args.acknowledged_at:
+            changed = replace(matches[0], acknowledged_at=_when(args.acknowledged_at))
+        else:
+            changed = replace(matches[0], fixed_at=_when(args.fixed_at))
+        entries = [changed if e is matches[0] else e for e in entries]
+    else:
+        entries = [*entries, OptOut(server_id=args.server, requested_at=_when(args.requested_at))]
+
+    publish_ledger(repo, entries, key=key, parent=parent)
+    print(f"ledger now holds {len(entries)} entries")
     return 0
 
 
@@ -601,6 +761,8 @@ def main(argv: list[str] | None = None) -> int:
             return _site_command(args)
         if args.command == "history":
             return _history_command(args)
+        if args.command == "ledger":
+            return _ledger_command(args)
         return _crawl(args)
     except (
         CollapsedRun,
@@ -616,6 +778,7 @@ def main(argv: list[str] | None = None) -> int:
         # are worth having only while they are loud.
         InputError,
         HistoryRefused,
+        LedgerRefused,
         VaultError,
         FetchFailed,
         GitHubSearchError,
