@@ -400,3 +400,50 @@ def test_a_notified_finding_that_moved_line_still_publishes_when_its_window_clos
     published = load_previous(tmp_path / "data" / "findings.jsonl")
     assert [p["location"]["line"] for p in published] == [7]
     assert published[0]["disclosure_state"] == "disclosed"
+
+
+# --- findings no longer seen ---------------------------------------------------
+
+
+def _nothing(root: Path, server_id: str, commit_sha: str) -> ScanReport:
+    return ScanReport(findings=(), skipped=())
+
+
+def test_a_disclosed_finding_that_was_fixed_is_still_published_marked_no_longer_seen(
+    tmp_path: Path,
+) -> None:
+    """As advisories are: fixing it does not unpublish what the window allowed."""
+    _run(tmp_path, [_record("a/one")], now=NOW)
+    original = load_previous(tmp_path / "cache" / "history.jsonl")[0]["finding_id"]
+    later = NOW + DISCLOSURE_WINDOW + timedelta(days=2)
+    disclosure = {"a/one": DisclosureRecord("a/one", notified={original: NOW})}
+    _run(tmp_path, [_record("a/one")], scan=_nothing, disclosure=disclosure, now=later)
+
+    published = load_previous(tmp_path / "data" / "findings.jsonl")
+    summary = json.loads((tmp_path / "data" / "summary.json").read_text())
+    assert [p["finding_id"] for p in published] == [original]
+    assert published[0]["no_longer_seen_since"] == "2026-09-20T00:00:00Z"
+    assert summary["found_by_rule"] == {}, "a fixed finding is not found tonight"
+    assert summary["disclosure"]["no_longer_seen"] == 1
+
+
+def test_a_withheld_finding_that_disappeared_is_not_published(tmp_path: Path) -> None:
+    _run(tmp_path, [_record("a/one")], now=NOW)
+    _run(tmp_path, [_record("a/one")], scan=_nothing, now=NOW + timedelta(days=200))
+    assert load_previous(tmp_path / "data" / "findings.jsonl") == []
+
+
+def test_a_lesser_finding_that_disappeared_is_simply_fixed(tmp_path: Path) -> None:
+    _run(tmp_path, [_record("a/one")], scan=_scanner("medium"), now=NOW)
+    _run(tmp_path, [_record("a/one")], scan=_nothing, now=NOW + timedelta(days=1))
+    assert load_previous(tmp_path / "data" / "findings.jsonl") == []
+
+
+def test_a_retracted_finding_stays_visible_after_the_rule_stops_producing_it(tmp_path: Path) -> None:
+    # Withdrawn as our error after a rule fix: the correction stays on the record.
+    _run(tmp_path, [_record("a/one")], scan=_scanner("medium"), now=NOW)
+    original = load_previous(tmp_path / "cache" / "history.jsonl")[0]["finding_id"]
+    disclosure = {"a/one": DisclosureRecord("a/one", withdrawn=frozenset({original}))}
+    _run(tmp_path, [_record("a/one")], scan=_nothing, disclosure=disclosure, now=NOW + timedelta(days=1))
+    published = load_previous(tmp_path / "data" / "findings.jsonl")
+    assert [(p["disclosure_state"], "no_longer_seen_since" in p) for p in published] == [("retracted", True)]

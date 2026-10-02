@@ -141,6 +141,22 @@ def _disclosure_bar(site: SiteData) -> str:
   </ul>"""
 
 
+def _status_note(group: Decision) -> str:
+    """A line under the date, only when the finding is not simply current."""
+    return "" if group.status == "current" else f"<br>{escape(group.status)}"
+
+
+def _no_longer_seen(site: SiteData) -> str:
+    """Published findings the latest scan no longer produces, stated apart from what it found."""
+    if not site.no_longer_seen:
+        return ""
+    return (
+        f'  <p class="note">{_n(site.no_longer_seen)} published findings are no longer seen by the '
+        "latest scan, most often because they were fixed. They stay published, marked, and are not "
+        "counted above.</p>\n"
+    )
+
+
 def render_overview(site: SiteData) -> str:
     """The overview page, as one self-contained document.
 
@@ -239,26 +255,26 @@ def render_overview(site: SiteData) -> str:
   </ul>
 
   <div class="callout">
-    <p><strong>How often is this right? Not yet measured.</strong> 288 findings have been
-    drawn at random from this output and are being labelled by hand; per-rule precision and
-    recall will be published here with the threshold they were measured at, and the labelled
-    set will ship as an open benchmark. Until then, treat every finding below as a candidate
+    <p><strong>How often is this right? Not yet measured.</strong> 566 findings have been
+    drawn at random from this output and frozen, and 116 are queued for a person to label;
+    per-rule precision and recall will be published here with the threshold they were measured
+    at, and the labelled set will ship as an open benchmark. Until then, treat every finding below as a candidate
     rather than a confirmed problem.</p>
   </div>
 
 {_disclosure_bar(site)}
-
+{_no_longer_seen(site)}
   <div class="callout">
     <p><strong>{_n(site.withheld)} of {_n(site.findings_found)} findings are not shown.</strong>
     Every high and critical finding is withheld, so the table below is the least severe part of
     what was found and is not a picture of the ecosystem&rsquo;s worst problems.
-    <strong>No maintainer has been notified:</strong> notification is not implemented, a
-    disclosure window opens only when a notification is recorded, and so nothing above medium
-    severity has ever been published. The gate failing closed is the intended direction.
+    <strong>No maintainer has been notified yet.</strong> Only findings a person has verified
+    are reported, privately; each finding&rsquo;s 90-day window opens only when a notice naming
+    it is recorded, and so nothing above medium severity has ever been published. The gate failing closed is the intended direction.
     Maintainer opt-out is honoured unconditionally.</p>
   </div>
 
-  <h2>By rule <span class="n">&mdash; published</span></h2>
+  <h2>By rule <span class="n">- published</span></h2>
   <div class="scroll">
   <table>
     <caption>Found is every finding the rule produced. Published is what cleared the
@@ -285,7 +301,7 @@ def render_overview(site: SiteData) -> str:
   </table>
   </div>
 
-  <h2>Most repeated decisions <span class="n">&mdash; published</span></h2>
+  <h2>Most repeated decisions <span class="n">- published</span></h2>
   <div class="scroll">
   <table>
     <caption>One misconfiguration set on many response paths. Counting the rows instead of
@@ -470,7 +486,7 @@ def render_server(server_id: str, site: SiteData, *, repo_urls: dict[str, str]) 
         f"      <tr><td>{escape(g.evidence)}</td>"
         f'<td class="n">{g.occurrences}</td>'
         f"<td><code>{escape(', '.join(g.locations))}</code></td>"
-        f'<td class="note">{escape(g.first_seen[:10])}</td></tr>'
+        f'<td class="note">{escape(g.first_seen[:10])}{_status_note(g)}</td></tr>'
         for g in sorted(groups, key=lambda g: -g.occurrences)
     )
 
@@ -483,13 +499,13 @@ def render_server(server_id: str, site: SiteData, *, repo_urls: dict[str, str]) 
   <div class="callout">
     <p><strong>This is not a clean bill of health.</strong> Only findings that cleared the
     disclosure gate appear below, and every high and critical finding is withheld - so this
-    server may have findings that are not shown here. Notification is not implemented yet, so
+    server may have findings that are not shown here. No maintainer has been notified yet, so
     no disclosure window has opened and nothing above medium severity has been published at
     all. Accuracy has not been measured, so treat each finding below as a candidate rather
     than a confirmed problem.</p>
   </div>
 
-  <h2>Published findings <span class="n">&mdash; {len(groups)} decision{"" if len(groups) == 1 else "s"}</span></h2>
+  <h2>Published findings <span class="n">- {len(groups)} decision{"" if len(groups) == 1 else "s"}</span></h2>
   <div class="scroll">
   <table>
     <thead><tr><th scope="col">What the rule reported</th><th scope="col" class="n">Lines</th><th scope="col">Where</th><th scope="col">First seen</th></tr></thead>

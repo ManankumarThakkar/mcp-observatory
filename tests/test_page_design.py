@@ -147,7 +147,8 @@ def test_the_layout_has_no_fixed_pixel_widths() -> None:
 def test_the_page_does_not_imply_a_disclosure_process_is_running() -> None:
     """The policy was amended after the first publication because the site said
     findings were "pending private disclosure to the maintainer", which reads as
-    a process that runs. Nothing notifies anyone, so no window has ever opened.
+    a process that runs. Until the first notice is sent, the page must say plainly
+    that no maintainer has been notified, so no window has opened.
 
     A security page that overstates its own disclosure practice is the one
     overstatement that matters most here, and it is checkable.
@@ -158,7 +159,7 @@ def test_the_page_does_not_imply_a_disclosure_process_is_running() -> None:
     for html in (render_overview(SITE), render_server("acme/one", SITE, repo_urls={})):
         lowered = html.lower()
         assert "pending private disclosure" not in lowered
-        assert "not implemented" in lowered
+        assert "no maintainer has been notified yet" in lowered
 
 
 def test_every_page_names_its_author_and_links_the_source() -> None:

@@ -200,11 +200,13 @@ def run_pipeline(
     merged = merge_findings(load_previous(history_path), current, now=stamp)
     write_findings(history_path, merged)
     tonight = seen_in(merged, stamp)
+    unseen = [record for record in merged if record["last_seen"] != stamp]
 
     published_count, counts = _publish(
         tonight,
+        unseen=unseen,
         data_dir=data_dir,
-        disclosure_records=follow_moves(disclosure_records, tonight),
+        disclosure_records=follow_moves(disclosure_records, merged),
         now=now,
         tool_version=tool_version,
     )
@@ -254,9 +256,17 @@ def _write_servers(path: Path, repo_urls: Mapping[str, str], findings_path: Path
     )
 
 
+# A finding the latest scan no longer produces is still published in these
+# states, marked with when it was last seen: a disclosed one because fixing it
+# does not unpublish what its window allowed, as with advisories, and a
+# retracted one because the correction belongs on the record.
+STILL_PUBLISHED_WHEN_UNSEEN = frozenset({"disclosed", "retracted"})
+
+
 def _publish(
     scan_findings: Sequence[Mapping[str, Any]],
     *,
+    unseen: Sequence[Mapping[str, Any]] = (),
     data_dir: Path,
     disclosure_records: Mapping[str, DisclosureRecord],
     now: datetime,
@@ -269,29 +279,36 @@ def _publish(
     published" would drift, and the drift would surface as findings reaching
     a public directory by the path nobody was checking.
 
-    It is given one scan's findings, never the whole history. A finding whose
-    window closes after it stopped being produced is not published here yet:
-    showing it as "no longer seen" is item 5 of the disclosure design, and no
-    window can close before February 2027.
+    Counts describe one scan, the latest, never the whole history. Findings it
+    no longer produces arrive in `unseen` and are published only in
+    STILL_PUBLISHED_WHEN_UNSEEN, marked `no_longer_seen_since`, counted apart
+    from what was found tonight, and kept out of the SARIF, which describes the
+    code as it is now.
     """
     findings = [Finding.from_dict(record) for record in scan_findings]
     published, counts = split_for_publication(findings, disclosure_records, now=now)
     publishable = {finding.finding_id for finding in published}
 
+    def state(record: Mapping[str, Any]) -> str:
+        return disclosure_state(
+            Finding.from_dict(record), disclosure_records.get(record["server_id"]), now=now
+        )
+
+    still_shown = [
+        {**record, "disclosure_state": s, "no_longer_seen_since": record["last_seen"]}
+        for record in unseen
+        if (s := state(record)) in STILL_PUBLISHED_WHEN_UNSEEN
+    ]
+    counts = {**counts, "no_longer_seen": len(still_shown)}
+
     write_findings(
         data_dir / FINDINGS_FILE,
         [
-            {
-                **record,
-                "disclosure_state": disclosure_state(
-                    Finding.from_dict(record),
-                    disclosure_records.get(record["server_id"]),
-                    now=now,
-                ),
-            }
+            {**record, "disclosure_state": state(record)}
             for record in scan_findings
             if record["finding_id"] in publishable
-        ],
+        ]
+        + still_shown,
     )
 
     (data_dir / SARIF_FILE).write_text(
@@ -372,11 +389,13 @@ def publish_from_history(
             f"{summary_path} carries no generated_at, so the scan it describes cannot "
             "be told apart from older records in the history"
         )
-    latest = seen_in(load_previous(history_path), scanned_at)
+    history = load_previous(history_path)
+    latest = seen_in(history, scanned_at)
     published, counts = _publish(
         latest,
+        unseen=[record for record in history if record["last_seen"] != scanned_at],
         data_dir=write_dir,
-        disclosure_records=follow_moves(disclosure_records, latest),
+        disclosure_records=follow_moves(disclosure_records, history),
         now=now,
         tool_version=tool_version,
     )

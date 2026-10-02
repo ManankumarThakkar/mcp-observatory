@@ -211,3 +211,23 @@ def test_the_total_found_is_carried_beside_the_total_published(tmp_path: Path) -
     assert site.findings_published == 1
     assert site.withheld == 963
     assert site.findings_found == 964
+
+
+def test_a_finding_no_longer_seen_is_shown_but_not_counted_as_found(tmp_path: Path) -> None:
+    """Published because its window closed, but not part of tonight's scan."""
+    fixed = _published(
+        finding_id="f2", evidence="reads any path", severity="high",
+        disclosure_state="disclosed", no_longer_seen_since="2026-12-01T03:10:00Z",
+    )
+    site = build_site_data(_write(tmp_path, [_published(), fixed]))
+
+    assert site.findings_published == 1
+    assert site.findings_found == 964
+    assert site.no_longer_seen == 1
+    statuses = {g.evidence: g.status for g in site.groups}
+    assert statuses == {"accepts any origin (*)": "current", "reads any path": "no longer seen since 2026-12-01"}
+
+
+def test_a_retracted_finding_is_marked_as_our_error(tmp_path: Path) -> None:
+    site = build_site_data(_write(tmp_path, [_published(disclosure_state="retracted")]))
+    assert [g.status for g in site.groups] == ["withdrawn: our error"]

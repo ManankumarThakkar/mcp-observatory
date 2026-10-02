@@ -2,6 +2,7 @@
 
 import json
 from collections import Counter, defaultdict
+from collections.abc import Mapping
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
@@ -29,6 +30,8 @@ class Decision:
     locations: tuple[str, ...]
     first_seen: str
     last_seen: str
+    # "current", "no longer seen since <date>", or "withdrawn: our error".
+    status: str = "current"
 
 
 @dataclass(frozen=True)
@@ -90,6 +93,9 @@ class SiteData:
     rules: tuple[RuleSummary, ...]
     coverage: tuple[CoverageRow, ...]
     groups: tuple[Decision, ...]
+    # Published because their window closed, but no longer produced by the
+    # latest scan. Shown, and kept out of every count of what was found.
+    no_longer_seen: int = 0
 
 
 def _load_jsonl(path: Path) -> list[dict[str, Any]]:
@@ -135,13 +141,14 @@ def build_site_data(data_dir: Path) -> SiteData:
             "rescan to record it"
         )
     rows = _load_jsonl(data_dir / FINDINGS_FILE)
+    current = [row for row in rows if not row.get("no_longer_seen_since")]
 
     # One decision per server, rule and evidence. Grouping by server and rule
     # alone would merge a wildcard origin with a filesystem root, which are two
     # separate things to fix.
-    grouped: dict[tuple[str, str, str], list[dict[str, Any]]] = defaultdict(list)
+    grouped: dict[tuple[str, str, str, str], list[dict[str, Any]]] = defaultdict(list)
     for row in rows:
-        grouped[(row["server_id"], row["rule_id"], row["evidence"])].append(row)
+        grouped[(row["server_id"], row["rule_id"], row["evidence"], _status(row))].append(row)
 
     groups = tuple(
         Decision(
@@ -155,12 +162,14 @@ def build_site_data(data_dir: Path) -> SiteData:
             ),
             first_seen=min(str(m.get("first_seen", "")) for m in members),
             last_seen=max(str(m.get("last_seen", "")) for m in members),
+            status=status,
         )
         # Sorted so a rebuild produces no diff when nothing changed. The file is
         # committed, and a run that reordered it would churn the history for
         # no reason.
-        for (server_id, rule_id, evidence), members in sorted(grouped.items())
+        for (server_id, rule_id, evidence, status), members in sorted(grouped.items())
     )
+    current_groups = [g for g in groups if not g.status.startswith("no longer seen")]
 
     # Aggregate per-rule totals, published or not. Non-attributable, which is
     # the category the disclosure policy publishes immediately.
@@ -172,9 +181,9 @@ def build_site_data(data_dir: Path) -> SiteData:
             description=rule.description,
             languages=tuple(rule.languages),
             found=int(found_by_rule.get(rule.rule_id, 0)),
-            findings=sum(1 for row in rows if row["rule_id"] == rule.rule_id),
-            decisions=sum(1 for group in groups if group.rule_id == rule.rule_id),
-            servers=len({row["server_id"] for row in rows if row["rule_id"] == rule.rule_id}),
+            findings=sum(1 for row in current if row["rule_id"] == rule.rule_id),
+            decisions=sum(1 for group in current_groups if group.rule_id == rule.rule_id),
+            servers=len({row["server_id"] for row in current if row["rule_id"] == rule.rule_id}),
         )
         for rule in ALL_RULES
     )
@@ -191,19 +200,33 @@ def build_site_data(data_dir: Path) -> SiteData:
         scanned=int(summary.get("scanned", 0)),
         skipped=int(summary.get("skipped", 0)),
         failed=int(summary.get("failed", 0)),
-        findings_published=len(rows),
-        decisions_published=len(groups),
-        findings_found=len(rows) + withheld,
-        servers_affected=len({row["server_id"] for row in rows}),
+        findings_published=len(current),
+        decisions_published=len(current_groups),
+        findings_found=len(current) + withheld,
+        servers_affected=len({row["server_id"] for row in current}),
         withheld=withheld,
-        by_severity=dict(sorted(Counter(str(row["severity"]) for row in rows).items())),
+        by_severity=dict(sorted(Counter(str(row["severity"]) for row in current).items())),
         rules=rules,
         coverage=tuple(
             CoverageRow(rule_id=r.rule_id, title=r.title, languages=tuple(r.languages))
             for r in ALL_RULES
         ),
         groups=groups,
+        no_longer_seen=len(rows) - len(current),
     )
+
+
+def _status(row: Mapping[str, Any]) -> str:
+    """What a reader is told about a published finding beyond its details.
+
+    A retraction is stated even when the finding is also no longer seen,
+    because "our error" is the more important thing to say.
+    """
+    if row.get("disclosure_state") == "retracted":
+        return "withdrawn: our error"
+    if row.get("no_longer_seen_since"):
+        return f"no longer seen since {str(row['no_longer_seen_since'])[:10]}"
+    return "current"
 
 
 def write_site_data(site: SiteData, path: Path) -> None:

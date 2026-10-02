@@ -129,3 +129,22 @@ def test_every_declared_colour_is_a_valid_hex_value() -> None:
     for name, value in re.findall(r"(--[a-z-]+):\s*([^;]+);", style):
         if value.strip().startswith("#"):
             assert re.fullmatch(r"#[0-9a-fA-F]{3,8}", value.strip()), f"{name}: {value!r}"
+
+
+def test_findings_no_longer_seen_are_stated_apart_from_what_was_found() -> None:
+    from analyzer.report.page import render_overview
+    from analyzer.report.site import SiteData
+    from tests.conftest import SITE
+
+    html = render_overview(SiteData(**{**SITE.__dict__, "no_longer_seen": 3}))
+    assert "3 published findings are no longer seen" in html
+
+
+def test_the_overview_does_not_claim_notification_is_unbuilt_or_labels_are_by_hand() -> None:
+    from analyzer.report.page import render_overview
+    from tests.conftest import SITE
+
+    html = render_overview(SITE)
+    assert "notification is not implemented" not in html
+    assert "labelled by hand" not in html
+    assert "not yet measured" in html.lower()
