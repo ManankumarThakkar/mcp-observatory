@@ -16,7 +16,8 @@ def _annotations(tmp_path: Path, *records: tuple[str, str]) -> Path:
     path = tmp_path / "manan.jsonl"
     path.write_text(
         "".join(
-            json.dumps({"entry_id": e, "label": label, "reason": "", "annotator": "manan"}) + "\n"
+            json.dumps({"entry_id": e, "label": label, "reason": f"why {e}", "annotator": "manan"})
+            + "\n"
             for e, label in records
         )
     )
@@ -27,12 +28,12 @@ def test_only_findings_a_person_labelled_true_positive_count(tmp_path: Path) -> 
     path = _annotations(
         tmp_path, ("g-1", "true_positive"), ("g-2", "false_positive"), ("g-3", "unsure")
     )
-    assert human_true_positives(path, ENTRIES) == frozenset({"f-1"})
+    assert human_true_positives(path, ENTRIES) == {"f-1": "why g-1"}
 
 
 def test_the_latest_label_wins_so_an_undo_counts(tmp_path: Path) -> None:
     path = _annotations(tmp_path, ("g-1", "true_positive"), ("g-1", "false_positive"))
-    assert human_true_positives(path, ENTRIES) == frozenset()
+    assert human_true_positives(path, ENTRIES) == {}
 
 
 def test_a_missing_annotation_file_is_refused_not_read_as_nothing_verified(tmp_path: Path) -> None:

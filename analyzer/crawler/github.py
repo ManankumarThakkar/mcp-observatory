@@ -166,7 +166,7 @@ SEARCH_ENDPOINT = "https://api.github.com/search/code"
 PACE_SECONDS = 6.5
 
 
-def _authorised_opener(token: str) -> Opener:
+def authorised_opener(token: str) -> Opener:
     """An opener that authenticates, reusing the retry logic in `http_fetch`.
 
     Code search rejects anonymous requests outright, so the token is not an
@@ -198,7 +198,7 @@ def _authorised_opener(token: str) -> Opener:
 
 def github_search(token: str, *, sleep: Callable[[float], None] = time.sleep) -> SearchFn:
     """Build a search callable that keeps itself under the rate limit."""
-    opener = _authorised_opener(token)
+    opener = authorised_opener(token)
 
     def search(query: str, page: int) -> JsonObject:
         sleep(PACE_SECONDS)
