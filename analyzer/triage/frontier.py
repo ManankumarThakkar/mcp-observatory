@@ -11,18 +11,21 @@ from analyzer.triage.jev import build_question
 # The current frontier model. Named once so the benchmark reports which model
 # produced its figures, and so changing it is a visible diff rather than a
 # scattered edit.
-DEFAULT_MODEL = "claude-opus-5"
+DEFAULT_MODEL = "claude-opus-5-5"
 
 # Published per million tokens. Declared here so cost is computed from the
 # reported token counts rather than guessed, and so the two halves of the
 # arithmetic cannot drift apart in separate places.
-INPUT_USD_PER_MTOK = 5.00
-OUTPUT_USD_PER_MTOK = 25.00
+INPUT_USD_PER_MTOK = 4.00
+OUTPUT_USD_PER_MTOK = 20.00
 
-# A classification answer is one number. Low rather than absent, because on
-# this model disabling thinking has two documented failure modes - a tool call
-# written into visible text, and leaked internal tags - and lowering effort
-# gets the cost saving without either.
+# A classification answer is one number, so effort is low. Thinking cannot be
+# turned off on this model (a request that tries is rejected), and lowering
+# effort is the documented way to spend less on it. Set explicitly because the
+# model's default effort is medium.
+#
+# Thinking tokens count toward MAX_TOKENS. A response cut off by the cap raises
+# rather than half-parsing, so the measured sample shows whether 256 is enough.
 EFFORT = "low"
 MAX_TOKENS = 256
 

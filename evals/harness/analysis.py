@@ -159,7 +159,7 @@ def _flip_share(rows: Sequence[tuple[str, bool]]) -> float:
     return sum(1 for _, flipped in rows if flipped) / len(rows)
 
 
-def _flip_estimate(rows: Sequence[tuple[str, bool]], *, seed: int) -> str:
+def flip_estimate(rows: Sequence[tuple[str, bool]], *, seed: int) -> str:
     flipped = sum(1 for _, changed in rows if changed)
     low, high = cluster_bootstrap_ci(
         rows, cluster=lambda r: r[0], statistic=_flip_share, seed=seed
@@ -183,7 +183,7 @@ def h2_lines(entries: Sequence[Entry], *, seed: int) -> list[str]:
     ]
     if not rows:
         return ["H2: no paired findings."]
-    lines = [f"H2: the verdict changes with the context on {_flip_estimate(rows, seed=seed)}"]
+    lines = [f"H2: the verdict changes with the context on {flip_estimate(rows, seed=seed)}"]
     flips = Counter(server for server, changed in rows if changed)
     if flips:
         largest, count = min(flips.items(), key=lambda item: (-item[1], item[0]))
@@ -191,7 +191,7 @@ def h2_lines(entries: Sequence[Entry], *, seed: int) -> list[str]:
         if rest:
             lines.append(
                 f"    without {largest} ({count} of {flips.total()} flips): "
-                f"{_flip_estimate(rest, seed=seed)}"
+                f"{flip_estimate(rest, seed=seed)}"
             )
     lines.append("    compare with the test-retest noise floor stated in the registration")
     return lines
