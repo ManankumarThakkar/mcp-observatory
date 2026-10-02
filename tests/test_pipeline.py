@@ -447,3 +447,14 @@ def test_a_retracted_finding_stays_visible_after_the_rule_stops_producing_it(tmp
     _run(tmp_path, [_record("a/one")], scan=_nothing, disclosure=disclosure, now=NOW + timedelta(days=1))
     published = load_previous(tmp_path / "data" / "findings.jsonl")
     assert [(p["disclosure_state"], "no_longer_seen_since" in p) for p in published] == [("retracted", True)]
+
+
+def test_a_finding_no_longer_seen_stays_out_of_the_sarif(tmp_path: Path) -> None:
+    """The SARIF describes the code as it is now; a fixed finding is not in it."""
+    _run(tmp_path, [_record("a/one")], now=NOW)
+    original = load_previous(tmp_path / "cache" / "history.jsonl")[0]["finding_id"]
+    later = NOW + DISCLOSURE_WINDOW + timedelta(days=2)
+    disclosure = {"a/one": DisclosureRecord("a/one", notified={original: NOW})}
+    _run(tmp_path, [_record("a/one")], scan=_nothing, disclosure=disclosure, now=later)
+    sarif = json.loads((tmp_path / "data" / "findings.sarif").read_text())
+    assert sarif["runs"][0]["results"] == []

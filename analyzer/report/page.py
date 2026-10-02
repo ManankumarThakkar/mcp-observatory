@@ -141,20 +141,51 @@ def _disclosure_bar(site: SiteData) -> str:
   </ul>"""
 
 
+def _current(site: SiteData) -> list[Decision]:
+    """Decisions the latest scan still produces and that are not our own error."""
+    return [g for g in site.groups if g.status == "current"]
+
+
+def _index_row(
+    server_id: str, groups: list[Decision], *, slug: str, repo_urls: dict[str, str]
+) -> str:
+    """One server on the findings index, counting only its current decisions.
+
+    A server whose findings are all no longer seen or withdrawn still has a page,
+    so it is listed, with a note saying how many are not current.
+    """
+    current = [g for g in groups if g.status == "current"]
+    others = len(groups) - len(current)
+    note = f'<br><span class="note">{others} no longer current</span>' if others else ""
+    return (
+        f'      <tr><td><a href="servers/{slug}.html"><code>{escape(server_id)}</code></a><br>'
+        f'<span class="note">{_repo_cell(server_id, repo_urls)}</span></td>'
+        f'<td class="n">{len(current)}</td>'
+        f'<td class="n">{sum(g.occurrences for g in current)}</td>'
+        f"<td>{escape(', '.join(sorted({g.evidence for g in current})))}{note}</td></tr>"
+    )
+
+
 def _status_note(group: Decision) -> str:
     """A line under the date, only when the finding is not simply current."""
     return "" if group.status == "current" else f"<br>{escape(group.status)}"
 
 
 def _no_longer_seen(site: SiteData) -> str:
-    """Published findings the latest scan no longer produces, stated apart from what it found."""
+    """Published findings not counted as found, stated apart: no longer seen, or our error."""
+    retracted = (
+        f'  <p class="note">{_n(site.retracted)} published findings were withdrawn as our own '
+        "error. They stay visible, marked, and are not counted above.</p>\n"
+        if site.retracted
+        else ""
+    )
     if not site.no_longer_seen:
-        return ""
+        return retracted
     return (
         f'  <p class="note">{_n(site.no_longer_seen)} published findings are no longer seen by the '
-        "latest scan, most often because they were fixed. They stay published, marked, and are not "
-        "counted above.</p>\n"
-    )
+        "latest scan: fixed, changed, or on a server that could not be scanned tonight. They stay "
+        "published, marked, and are not counted above.</p>\n"
+    ) + retracted
 
 
 def render_overview(site: SiteData) -> str:
@@ -199,7 +230,7 @@ def render_overview(site: SiteData) -> str:
         f"<code>{escape(g.server_id)}</code></a></td>"
         f"<td>{escape(g.evidence)}</td>"
         f'<td class="n">{_n(g.occurrences)}</td></tr>'
-        for g in sorted(site.groups, key=lambda g: -g.occurrences)[:10]
+        for g in sorted(_current(site), key=lambda g: -g.occurrences)[:10]
     )
 
     return f"""<!doctype html>
@@ -440,11 +471,7 @@ def render_findings(site: SiteData, *, repo_urls: dict[str, str]) -> str:
         by_server.setdefault(group.server_id, []).append(group)
 
     rows = "\n".join(
-        f"      <tr><td><a href=\"servers/{slugs[server_id]}.html\"><code>{escape(server_id)}</code></a><br>"
-        f'<span class="note">{_repo_cell(server_id, repo_urls)}</span></td>'
-        f'<td class="n">{len(groups)}</td>'
-        f'<td class="n">{sum(g.occurrences for g in groups)}</td>'
-        f"<td>{escape(', '.join(sorted({g.evidence for g in groups})))}</td></tr>"
+        _index_row(server_id, groups, slug=slugs[server_id], repo_urls=repo_urls)
         for server_id, groups in sorted(by_server.items())
     )
 

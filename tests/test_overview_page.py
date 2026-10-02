@@ -148,3 +148,17 @@ def test_the_overview_does_not_claim_notification_is_unbuilt_or_labels_are_by_ha
     assert "notification is not implemented" not in html
     assert "labelled by hand" not in html
     assert "not yet measured" in html.lower()
+
+
+def test_only_current_decisions_are_listed_as_most_repeated() -> None:
+    from analyzer.report.page import render_overview
+    from analyzer.report.site import Decision, SiteData
+    from tests.conftest import SITE
+
+    groups = (
+        Decision("a/b", "SCOPE-OVERBROAD", "medium", "current evidence", 1, ("x:1",), "d", "d"),
+        Decision("a/b", "SCOPE-OVERBROAD", "medium", "retracted evidence", 9, ("x:2",), "d", "d", "withdrawn: our error"),
+    )
+    html = render_overview(SiteData(**{**SITE.__dict__, "groups": groups}))
+    assert "current evidence" in html
+    assert "retracted evidence" not in html

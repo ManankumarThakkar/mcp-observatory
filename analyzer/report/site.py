@@ -96,6 +96,9 @@ class SiteData:
     # Published because their window closed, but no longer produced by the
     # latest scan. Shown, and kept out of every count of what was found.
     no_longer_seen: int = 0
+    # Withdrawn as our own error. Shown, marked, and counted apart: a known
+    # error is not a finding, as a withdrawn serious finding is not.
+    retracted: int = 0
 
 
 def _load_jsonl(path: Path) -> list[dict[str, Any]]:
@@ -141,7 +144,7 @@ def build_site_data(data_dir: Path) -> SiteData:
             "rescan to record it"
         )
     rows = _load_jsonl(data_dir / FINDINGS_FILE)
-    current = [row for row in rows if not row.get("no_longer_seen_since")]
+    current = [row for row in rows if _status(row) == "current"]
 
     # One decision per server, rule and evidence. Grouping by server and rule
     # alone would merge a wildcard origin with a filesystem root, which are two
@@ -169,7 +172,7 @@ def build_site_data(data_dir: Path) -> SiteData:
         # no reason.
         for (server_id, rule_id, evidence, status), members in sorted(grouped.items())
     )
-    current_groups = [g for g in groups if not g.status.startswith("no longer seen")]
+    current_groups = [g for g in groups if g.status == "current"]
 
     # Aggregate per-rule totals, published or not. Non-attributable, which is
     # the category the disclosure policy publishes immediately.
@@ -212,8 +215,12 @@ def build_site_data(data_dir: Path) -> SiteData:
             for r in ALL_RULES
         ),
         groups=groups,
-        no_longer_seen=len(rows) - len(current),
+        no_longer_seen=sum(1 for row in rows if _status(row).startswith("no longer seen")),
+        retracted=sum(1 for row in rows if _status(row) == RETRACTED_STATUS),
     )
+
+
+RETRACTED_STATUS = "withdrawn: our error"
 
 
 def _status(row: Mapping[str, Any]) -> str:
@@ -223,7 +230,7 @@ def _status(row: Mapping[str, Any]) -> str:
     because "our error" is the more important thing to say.
     """
     if row.get("disclosure_state") == "retracted":
-        return "withdrawn: our error"
+        return RETRACTED_STATUS
     if row.get("no_longer_seen_since"):
         return f"no longer seen since {str(row['no_longer_seen_since'])[:10]}"
     return "current"

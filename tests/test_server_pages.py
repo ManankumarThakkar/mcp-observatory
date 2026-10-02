@@ -184,3 +184,13 @@ def test_a_server_page_says_when_a_finding_is_no_longer_seen_or_was_our_error() 
     html = render_server("acme/one", SiteData(**{**SITE.__dict__, "groups": groups}), repo_urls=REPOS)
     assert "no longer seen since 2026-12-01" in html
     assert "withdrawn: our error" in html
+
+
+def test_the_findings_index_counts_current_decisions_and_notes_the_rest() -> None:
+    groups = (
+        Decision("acme/one", "SCOPE-OVERBROAD", "medium", "current", 2, ("a:1",), "d", "d"),
+        Decision("acme/one", "PATH-TRAVERSAL", "high", "gone", 1, ("b:1",), "d", "d", "no longer seen since 2026-12-01"),
+    )
+    html = render_findings(SiteData(**{**SITE.__dict__, "groups": groups}), repo_urls={})
+    assert '<td class="n">1</td><td class="n">2</td>' in html, "one current decision, two lines"
+    assert "1 no longer current" in html

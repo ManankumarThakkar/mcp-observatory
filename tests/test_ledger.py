@@ -245,3 +245,22 @@ def test_a_withdrawal_and_an_extension_follow_a_moved_finding() -> None:
     carried = follow_moves(records, history)["acme/notes"]
     assert disclosure_state(moved, carried, now=NOW) == "withdrawn"
     assert disclosure_state(other_moved, carried, now=NOW) == "withheld"
+
+
+def test_the_latest_of_two_extensions_wins_even_across_a_move() -> None:
+    """Review of #66: nothing checked that the later extension wins."""
+    from analyzer.report.ledger import Extension, follow_moves
+
+    old, moved = _finding(1), _finding(9)
+    sooner, later = NOW + timedelta(days=5), NOW + timedelta(days=40)
+    records = disclosure_records(
+        [
+            _notice(old, notified_at=NOW - DISCLOSURE_WINDOW - timedelta(days=1)),
+            Extension(server_id="acme/notes", finding_id=old.finding_id, until=later, agreed_at=NOW, note=""),
+            Extension(server_id="acme/notes", finding_id=old.finding_id, until=sooner, agreed_at=NOW, note=""),
+            Extension(server_id="acme/notes", finding_id=moved.finding_id, until=sooner, agreed_at=NOW, note=""),
+        ]
+    )
+    assert records["acme/notes"].extended[old.finding_id] == later
+    carried = follow_moves(records, [{**moved.to_dict(), "previous_ids": [old.finding_id]}])
+    assert carried["acme/notes"].extended[moved.finding_id] == later

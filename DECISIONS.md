@@ -785,10 +785,15 @@ because publishing this project's own errors is the point of it.
 look more accurate than it was. Counting no-longer-seen findings as found would inflate
 tonight's figure with problems already fixed.
 
-**Cost, accepted.** A retracted finding that the scanner still produces counts toward
-"found", because "found" means what the rules produced, and the page marks it as our
-error.
+**Amended 2026-10-02, after an independent review.** A retracted finding is now kept
+out of "found" and counted apart, as a withdrawn serious finding already was: a known
+error is not a finding. As first shipped it counted toward "found", which was
+inconsistent between severities. The same review found that a finding both retracted
+and no longer seen still inflated the decision counts, because the site recognised
+"no longer seen" by its status text. Every count now reads one explicit status.
+
+**Cost, accepted.** "No longer seen" covers a server that could not be scanned tonight
+as well as one that fixed the finding, so the page says so rather than implying a fix.
 
 **Revisit when.** The first window closes, which will be the first real use of the
-no-longer-seen marker, or when a retraction shows that "found" should exclude known
-errors.
+no-longer-seen marker.
