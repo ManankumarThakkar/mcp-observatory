@@ -20,6 +20,12 @@ it exists to detect. This constraint is load-bearing, not a precaution.
 
 ## D2 - Commit scan results to the repository instead of hosting a database
 
+> **Partly superseded by D15 and D16, 2026-10-02.** The public site is no longer built
+> from committed `data/`, and the time series and findings history live on the
+> `nightly-data` branch, the history encrypted. `data/` on `main` is kept as the record of
+> the 2026-09-25 publication. The reasoning below about avoiding a hosted database still
+> holds.
+
 **Decision.** Findings are written to `data/` as JSONL and committed.
 
 **Why.** Git already provides versioning, history, and auditability. A
@@ -588,3 +594,201 @@ off on the code it was protecting.
 change rather than before it. If the interface check turns out to carry the same
 confusion - `0.0.0.0` is correct for a container and overbroad for a laptop - it
 needs the same treatment, and it is 26 of the 324 rather than 293.
+
+---
+
+## D15 - The nightly is the only writer of the public site
+
+**Decision.** The public site is built and deployed only by the nightly workflow, from
+a fresh scan. The separate workflow that redeployed `main`'s committed `data/` is gone.
+A merged change under `analyzer/` triggers the nightly instead, and runs queue rather
+than cancel each other. `data/` on `main` is kept as the record of the 2026-09-25
+publication, not as current figures.
+
+**Why.** Two workflows deployed the site from two different datasets, and whichever ran
+last won. After a rule change merged on 2026-09-26, the site showed the old rule's 324
+findings until the next nightly replaced them with 171. The two paths also counted
+differently: the local republication counted every finding ever recorded, so it
+reported 1,301 when the scan it described had produced 1,122. A reader saw numbers
+flip between datasets for reasons that had nothing to do with the ecosystem.
+
+**Alternatives.** Keeping both writers and ordering them adds a race to manage instead
+of removing it. Committing each night's results to `main` would need a write
+credential on a protected branch, which a project about supply-chain trust should not
+hold.
+
+**Cost, accepted.** Every change to how findings are produced or rendered now costs a
+full scan, about 25 minutes, before it is visible. This supersedes the "time series
+from git history" half of D2: the series lives on the `nightly-data` branch (D16).
+
+**Revisit when.** A site-only change needs to ship faster than a scan.
+
+---
+
+## D16 - The findings history persists between nights, encrypted, and fails closed
+
+**Decision.** The nightly restores last night's findings history before it crawls, and
+seals tonight's beside the trend series, in the same commit on `nightly-data`. The
+history is encrypted with `gpg --symmetric` (AES256), with the key held as a
+repository secret. It reaches only the two steps that need it, never the step that
+handles third-party code. Every published finding and every count comes from the
+latest scan only; the history exists for state that must outlive a night.
+
+**Why.** The disclosure policy publishes a finding 90 days after its maintainer is
+notified, which needs the nightly to remember a withheld finding on day 90. Until this,
+CI started every night empty, so no window could ever close in production. The
+history holds withheld findings, and the repository is public, so a plaintext history
+anywhere in it would publish them.
+
+**Why "fails closed" needed measuring, not assuming.** Three behaviours of gpg were
+tested rather than read:
+
+| Case | What gpg does | So the vault |
+| --- | --- | --- |
+| One byte of the ciphertext flipped | exits 2, but writes the whole altered plaintext | keeps output only after a clean exit |
+| A file that was never encrypted | exits 0 and returns its contents, no key needed | also requires the decryption status lines with integrity protection |
+| A refused decryption | sometimes leaves a partial `.part` file | works in a private directory removed whole |
+
+A restore also refuses: a missing history unless a first night is asked for by hand; a
+first night when a history exists; a history whose newest night is not the series' last
+point (a rollback); and a history with no series to check against. Any refusal fails
+the night, and the site keeps the previous build.
+
+**Why counts come from one scan.** Counting the whole history would add up every night
+ever scanned, the defect behind the 1,301 above, and would show fixed findings as
+current. On the real history, the scan the summary names is exactly 1,122 of 1,301
+records.
+
+**Alternatives.** A private companion repository needs a second write credential to
+protect. Keeping the history only locally reintroduces the second writer D15 removed.
+
+**Cost, accepted.** Losing the key loses the history, which is backed up outside the
+repository. A server whose scan fails tonight drops off the site for that night, though
+its records are kept. The runner is pinned to `ubuntu-24.04`, because `ubuntu-latest`
+moves to a new release inside the first disclosure windows and the encryption depends
+on gpg behaving as tested.
+
+**Revisit when.** The pinned runner image is replaced, which needs the three gpg
+behaviours above re-tested on the new one. Revisit also if failed servers stop being
+rare.
+
+---
+
+## D17 - Notify only verified findings, and open each window per finding
+
+**Decision.**
+
+- A maintainer is notified only of findings a person has read and labelled real.
+- Each finding's 90-day window opens from the first private notice that names it.
+- A finding no notice names is never published individually; it appears only in
+  aggregate counts.
+- Notices are recorded in a ledger, sealed like the history, on its own branch
+  (`disclosure-ledger`). It is written only from the maintainer's machine and read by
+  the nightly.
+- The tool drafts each notice; a person sends it.
+
+**Why verified only.** Static analysis produces false positives, and this project's
+own precision is not yet measured. Notifying every withheld finding would have sent
+several hundred mostly unverified alerts to unpaid maintainers under one person's name.
+What must be disclosed is a vulnerability that was found, not an alert that was raised.
+The ledger refuses, in code, a notice naming a finding without a person's
+`true_positive` label.
+
+**Why per finding.** The gate first held one notification date per server. The first
+notice to a server would then have started the clock for every serious finding on it,
+including ones the notice never named (the unverified ones) and ones first seen after
+it was sent. Ninety days later they would have been published as disclosed. No notice
+had been sent, so nothing leaked.
+
+**Why a separate branch with one writer.** The nightly force-pushes `nightly-data`. A
+notice recorded there mid-run could be lost to that push. The ledger is pushed without
+force, so a stale copy is rejected rather than overwriting a notice, and its commit
+messages carry only a count, because which servers have unfixed problems is what it
+keeps private.
+
+**Channel order.**
+
+1. GitHub private vulnerability reporting, checked read-only.
+2. The contact in a `SECURITY.md`.
+3. A public issue that asks only for a contact and describes nothing.
+
+A contact request opens no window, because no finding was described to anyone.
+
+**Cost, accepted.** Notices are limited by how fast a person can verify findings.
+Findings in abandoned projects have no route to publication, because a contact request
+opens no window. The earlier promise to publish them as `unmaintained` was removed
+rather than kept in a policy the code does not honour.
+
+**Revisit when.** A verified finding's maintainer cannot be reached through any
+channel. That needs a definition of "abandoned" decided before the case arises.
+
+---
+
+## D18 - A finding whose code moved keeps its identity, by matching rather than re-keying
+
+**Decision.** After each merge, findings not seen tonight are paired with findings
+first seen tonight that have the same server, rule, file and evidence, when the same
+number vanished as arrived, in line order. The new record inherits the original
+`first_seen` and lists the old ids in `previous_ids`. Notices, withdrawals and
+extensions follow a finding through those ids.
+
+**Why.** `finding_id` includes the line, so an edit anywhere above a finding re-keys it.
+Measured once the history persisted: 41 findings vanished between runs, and all 41
+reappeared at another line of the same file with identical evidence, on two servers
+whose commit had changed. Taken at face value that counted them as new, reset how long
+they had existed, and would orphan any notice. A maintainer editing the file in
+response to a notice would leave the old id never publishing and the new one never
+starting a window.
+
+**Why in line order, not unique evidence only.** The first rule paired only evidence
+that occurred once. Replayed on the real history, it matched 5 of the 41, because one
+file held 36 findings with identical evidence. Paired in line order when the counts
+match, all 41 matched. Every one shifted downward, as inserted code would cause, and the
+history fell from 1,018 records to 977, exactly the findings the latest scan reported.
+
+**Alternatives.** Removing the line from `finding_id` fixes the cause, but changes every
+id already issued, including those in the frozen study, whose registered fingerprint
+covers `finding_id`.
+
+**Cost, accepted.** Unequal counts are left as separate records, which is safe because
+a finding no notice names is withheld. Pairing by order can attach a notice to an
+identical-text finding one position away in the same file. The maintainer was told
+about that text in that file in the same words. Findings that moved before this
+landed were not paired after the fact and remain as unseen records, neither counted nor
+published.
+
+**Revisit when.** A mis-pairing is observed, or a new study starts and can adopt a
+line-free identity from its first day.
+
+---
+
+## D19 - Withdrawals, extensions, and disclosed findings that stay published after a fix
+
+**Decision.**
+
+- A serious finding its maintainer shows to be wrong is withdrawn and never published.
+- A published finding later withdrawn as our error stays visible, marked "withdrawn:
+  our error".
+- An agreed extension moves a finding's window to the later of 90 days and the agreed
+  date; it can never shorten one.
+- A disclosed finding that the latest scan no longer produces stays published, marked
+  "no longer seen since" its last sighting. It is counted apart from what was found.
+
+**Why.** Every notice tells its maintainer that a finding shown to be wrong is
+withdrawn, and that a fix needing more time can get it. Until this, the gate would have
+published on day 90 regardless, so the promise had nothing in code behind it. Keeping a
+disclosed finding after its fix follows the practice of security advisories: fixing a
+problem does not unpublish what its window allowed. A retraction stays on the record
+because publishing this project's own errors is the point of it.
+
+**Alternatives.** Removing a retracted finding quietly would make the published record
+look more accurate than it was. Counting no-longer-seen findings as found would inflate
+tonight's figure with problems already fixed.
+
+**Cost, accepted.** A retracted finding that the scanner still produces counts toward
+"found", because "found" means what the rules produced, and the page marks it as our
+error.
+
+**Revisit when.** The first window closes, which will be the first real use of the
+no-longer-seen marker, or when a retraction shows that "found" should exclude known
+errors.
