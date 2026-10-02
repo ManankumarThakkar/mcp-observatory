@@ -179,3 +179,36 @@ def test_a_failed_call_is_reported_with_its_reason_not_dropped(tmp_path: Path) -
         "ValueError: the model refused to answer for g-1",
         "ValueError: the model refused to answer for g-1",
     ]
+
+
+def test_a_retest_asks_again_with_a_fresh_cache_and_keeps_its_own_answers(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # The noise floor needs the same questions asked twice for real; answering
+    # the second time from the first run's cache would measure nothing.
+    snapshot, manifest = _frozen(tmp_path, [_entry(i, server=f"s/{i}") for i in range(3)])
+    fake = FixedJudge()
+    monkeypatch.setattr(second_judge, "adjudicator_for", lambda arm: fake)
+    out = tmp_path / "arms"
+    argv = ["--arm", "frontier", "--snapshot", str(snapshot), "--manifest", str(manifest), "--out", str(out)]
+    main([*argv, "--sample", "1"])
+    main([*argv, "--max-cost", "1"])
+    calls_before = fake.calls
+    capsys.readouterr()
+
+    assert main([*argv, "--max-cost", "1", "--retest"]) == 0
+
+    assert fake.calls - calls_before == 6, "every question asked again"
+    assert len((out / "frontier.retest.jsonl").read_text().splitlines()) == 3
+    printed = capsys.readouterr().out
+    assert "retest window: 0 of 3 verdicts changed" in printed
+
+
+def test_a_retest_needs_the_first_run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    snapshot, manifest = _frozen(tmp_path, [_entry(i) for i in range(3)])
+    monkeypatch.setattr(second_judge, "adjudicator_for", lambda arm: FixedJudge())
+    out = tmp_path / "arms"
+    argv = ["--arm", "frontier", "--snapshot", str(snapshot), "--manifest", str(manifest), "--out", str(out)]
+    main([*argv, "--sample", "1"])
+    with pytest.raises(RuntimeError, match="first run"):
+        main([*argv, "--max-cost", "1", "--retest"])
