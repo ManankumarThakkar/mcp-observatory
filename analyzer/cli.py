@@ -18,6 +18,7 @@ from analyzer.crawler.github import (
     SEARCH_QUERIES,
     GitHubSearchError,
     SearchFn,
+    authorised_opener,
     github_search,
     iter_discoveries,
 )
@@ -36,6 +37,7 @@ from analyzer.pipeline import (
     publish_from_history,
     run_pipeline,
 )
+from analyzer.report.channels import ChannelLookupFailed, suggest_channel
 from analyzer.report.gate import DISCLOSURE_WINDOW, DisclosureRecord
 from analyzer.report.history_store import HistoryRefused, restore_history, save_history
 from analyzer.report.ledger import (
@@ -49,6 +51,7 @@ from analyzer.report.ledger import (
 )
 from analyzer.report.ledger_store import fetch_ledger, publish_ledger, read_branch_history
 from analyzer.report.merge import utc_stamp
+from analyzer.report.notices import render_contact_request, render_notice, select_findings
 from analyzer.report.page import write_site
 from analyzer.report.site import build_site_data, write_site_data
 from analyzer.report.trend import append_point, point_from_site
@@ -249,6 +252,15 @@ def _build_parser() -> argparse.ArgumentParser:
     show.add_argument(
         "--ids", action="store_true", help="Also print notice ids, which name servers."
     )
+
+    notices = subcommands.add_parser(
+        "notices",
+        help="Draft private notices from verified findings into a private local folder.",
+    )
+    notices.add_argument("--annotator", required=True, help="Whose labels verify the findings.")
+    notices.add_argument("--entries", default=".cache/golden-entries.jsonl")
+    notices.add_argument("--index", default=str(DEFAULT_INDEX_PATH))
+    notices.add_argument("--out", default=str(DEFAULT_CACHE_DIR / "notices"))
 
     crawl = subcommands.add_parser(
         "crawl", help="Read the registry and record what we will scan."
@@ -659,7 +671,7 @@ def _ledger_command(args: argparse.Namespace) -> int:
         check_notice(
             notice,
             history=read_branch_history(repo, key=key),
-            verified=human_true_positives(annotation_paths(args.annotator)[1], golden),
+            verified=human_true_positives(annotation_paths(args.annotator)[1], golden).keys(),
             now=now,
         )
         entries = [*entries, notice]
@@ -677,6 +689,63 @@ def _ledger_command(args: argparse.Namespace) -> int:
 
     publish_ledger(repo, entries, key=key, parent=parent)
     print(f"ledger now holds {len(entries)} entries")
+    return 0
+
+
+def _notices_command(args: argparse.Namespace) -> int:
+    """Draft one notice per server into a folder only this user can read.
+
+    Prints counts only. The drafts hold vulnerability details, and this output
+    is often read with someone else watching.
+    """
+    from evals.golden.annotate import annotation_paths
+    from evals.golden.verified import human_true_positives
+
+    key = os.environ.get("HISTORY_KEY", "")
+    token = os.environ.get(TOKEN_VARIABLE, "")
+    if not key:
+        raise InputError("HISTORY_KEY is not set")
+    if not token:
+        raise InputError(f"{TOKEN_VARIABLE} is not set; the read-only channel check needs it")
+    repo = Path()
+    golden = [
+        json.loads(line)
+        for line in Path(args.entries).read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    selection = select_findings(
+        read_branch_history(repo, key=key),
+        human_true_positives(annotation_paths(args.annotator)[1], golden),
+        fetch_ledger(repo, key=key)[0],
+    )
+    urls = {record.server_id: record.repo_url for record in load_server_index(Path(args.index))}
+    if missing := sorted(set(selection.drafts) - set(urls)):
+        raise InputError(f"{len(missing)} servers with drafts are not in {args.index}")
+
+    out = Path(args.out)
+    out.mkdir(parents=True, exist_ok=True)
+    out.chmod(0o700)
+    opener = authorised_opener(token)
+    now = datetime.now(UTC)
+    for server_id, findings in selection.drafts.items():
+        channel = suggest_channel(urls[server_id], opener)
+        name = server_id.replace("/", "--")
+        (out / f"{name}.md").write_text(
+            render_notice(
+                server_id, urls[server_id], findings, channel, now=now, annotator=args.annotator
+            ),
+            encoding="utf-8",
+        )
+        if channel is not None and channel.channel == "contact_request":
+            (out / f"{name}.contact.md").write_text(
+                render_contact_request(server_id), encoding="utf-8"
+            )
+    drafts = len(selection.drafts)
+    print(
+        f"{drafts} draft{'s' * (drafts != 1)} in {out}; skipped "
+        f"{selection.already_notified} already notified, {selection.opted_out} opted out, "
+        f"{selection.no_longer_produced} no longer produced"
+    )
     return 0
 
 
@@ -763,6 +832,8 @@ def main(argv: list[str] | None = None) -> int:
             return _history_command(args)
         if args.command == "ledger":
             return _ledger_command(args)
+        if args.command == "notices":
+            return _notices_command(args)
         return _crawl(args)
     except (
         CollapsedRun,
@@ -779,6 +850,7 @@ def main(argv: list[str] | None = None) -> int:
         InputError,
         HistoryRefused,
         LedgerRefused,
+        ChannelLookupFailed,
         VaultError,
         FetchFailed,
         GitHubSearchError,
