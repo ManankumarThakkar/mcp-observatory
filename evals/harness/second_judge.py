@@ -13,6 +13,7 @@ refused if that measurement projects past it.
 
 import argparse
 import json
+import statistics
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -26,7 +27,7 @@ from evals.golden.study import STUDY_SEED, check_frozen, probability_digest
 from evals.harness.analysis import flip_estimate
 from evals.harness.arms import ARMS, adjudicator_for
 from evals.harness.experiment import eligible, verdict
-from evals.harness.stats import cohens_kappa
+from evals.harness.stats import cohens_kappa, sign_test
 
 Entry = Mapping[str, Any]
 
@@ -82,6 +83,23 @@ def judge(
     return judged
 
 
+def shift_line(label: str, pairs: Sequence[tuple[float, float]]) -> str:
+    """How a judge's probability moves from the window to the whole function.
+
+    Needs no threshold, so it still measures context sensitivity for a judge
+    whose scores all sit on one side of the midpoint, where flips cannot occur.
+    """
+    shifts = sorted(function - window for window, function in pairs)
+    lower = sum(1 for d in shifts if d < 0)
+    higher = sum(1 for d in shifts if d > 0)
+    median = statistics.median(shifts)
+    return (
+        f"  {label} {lower} lower with the whole function, {higher} higher, "
+        f"{len(shifts) - lower - higher} unchanged; sign test p = {sign_test(lower, higher):.4f}; "
+        f"median shift {median:+.2f}"
+    )
+
+
 def summary_lines(
     entries: Sequence[Entry], answers: Mapping[str, Mapping[str, float]], *, arm: str, seed: int
 ) -> list[str]:
@@ -110,6 +128,22 @@ def summary_lines(
         lines.append(
             f"  {condition}: {agree}/{len(answered)} verdicts agree with the first judge, {kappa}"
         )
+    # Added after the 20-finding sample showed this judge scoring every finding
+    # below 0.5, where the midpoint flip above cannot occur. Exploratory like
+    # the rest, and labelled as added after looking.
+    lines.append("  threshold-free, added after the sample (probability from window to function):")
+    lines.append(
+        shift_line(
+            "this judge:",
+            [(answers[str(e["entry_id"])]["window"], answers[str(e["entry_id"])]["function"]) for e in answered],
+        )
+    )
+    lines.append(
+        shift_line(
+            "first judge, same findings:",
+            [(float(e["probabilities"]["window"]), float(e["probabilities"]["function"])) for e in answered],
+        )
+    )
     return lines
 
 
