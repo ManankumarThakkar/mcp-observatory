@@ -131,7 +131,7 @@ by reading the code - by Claude, a model, not by a person.
 | --- | ---: | ---: |
 | Every finding the rules report | **0.81** | **1.00** |
 | Only findings the rules call high confidence | 0.62 | 0.14 |
-| A calibrated judgement above 0.5 | 0.89 | 0.94 |
+| The judge's probability above 0.5 | 0.89 | 0.94 |
 
 **This is a pilot, not the accuracy figure this project exists to publish, and
 you cannot reproduce it from this repository.** Three limits, the third of which

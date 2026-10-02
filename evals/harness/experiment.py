@@ -208,20 +208,20 @@ def split_by_prediction(
     return predicted, control
 
 
-# The point a calibrated answer carries no information. A model that cannot tell
+# The point an answer carries no information. A model that cannot tell
 # from what it was shown answers here, which is what makes distance from it a
 # measure of how decidable the finding was.
 UNDECIDED = 0.5
 
 
 def decisiveness(probability: float) -> float:
-    """How far a calibrated answer is from carrying no information.
+    """How far an answer is from carrying no information.
 
     Used instead of an unsure band, and deliberately. Discretising a probability
     into real, not real and unsure needs two thresholds, and the experiment's
     result would then depend on where they were put - a reader could move them
     and move the finding. Distance from one half needs no threshold, uses the
-    whole range, and is the quantity a calibrated model is actually reporting.
+    whole range, and is the quantity a calibrated model would be reporting.
     """
     return abs(probability - UNDECIDED)
 
@@ -489,11 +489,12 @@ def per_rule_effects(entries: Sequence[Mapping[str, Any]]) -> dict[str, PairedEf
 
 
 def verdict(probability: float) -> str:
-    """The classification a calibrated probability implies.
+    """The classification a probability implies, at the midpoint.
 
-    At the midpoint, not at a tuned threshold. One half is simply what "more
-    likely than not" means for a calibrated number, so it needs no support from
-    the data and cannot be accused of having been picked to suit it. Tuning a
+    At the midpoint, not at a tuned threshold. It was fixed before any data was
+    seen, so it cannot be accused of having been picked to suit it. If the
+    judge is calibrated, one half is what "more likely than not" means; whether
+    it is, is measured on human labels (the study's H4), not assumed here. Tuning a
     threshold is for trading precision against recall, and that trade needs
     ground truth this does not yet have.
 
@@ -531,7 +532,7 @@ def record_verdicts(entries: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]
                     continue
                 observations[condition] = {
                     "label": verdict(float(probability)),
-                    "reason": f"calibrated probability {probability:.2f} at the midpoint",
+                    "reason": f"probability {probability:.2f} at the 0.5 midpoint",
                     "labelled_by": "model",
                 }
         if observations:

@@ -190,7 +190,7 @@ measurement quality is worse than fewer. `SCOPE-OVERBROAD` is the first to cut i
 ```
 
 A calibrated probability and the threshold applied to it, not a free-text
-verdict: a number that means what it says can be thresholded, tuned and
+verdict (calibration is a requirement to be measured, not assumed of any judge): a number that means what it says can be thresholded, tuned and
 reported as precision and recall *at that threshold*, so a reader can see the
 trade and disagree with it. `adjudicated` is false and `probability` absent
 when a finding was never sent - which is a different fact from a low

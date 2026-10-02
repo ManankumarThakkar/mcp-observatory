@@ -395,6 +395,11 @@ Jev, is the leading candidate. It is **not yet chosen**: Plan 3's golden set
 scores it against a frontier model and against the rules alone, and that
 measurement decides.
 
+> **Note, 2026-10-02.** No calibration evidence exists yet for any judge. The
+> requirement stands; whether Jev meets it is measured on human labels in the
+> pre-registered study (H4), and until then its output is described as a
+> probability, not a calibrated one.
+
 **Why a calibrated probability rather than a verdict.** D7 stakes this project
 on publishing a measured accuracy figure rather than asserting one. A number
 that means what it says can be thresholded, tuned, and reported as precision
