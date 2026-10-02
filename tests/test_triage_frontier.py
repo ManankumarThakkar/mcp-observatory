@@ -120,7 +120,7 @@ def test_the_model_is_the_current_frontier_one() -> None:
     client = _client()
     FrontierAdjudicator(client).decide(ENTRY)
 
-    assert client.messages.sent["model"] == DEFAULT_MODEL == "claude-opus-5"
+    assert client.messages.sent["model"] == DEFAULT_MODEL == "claude-opus-5-5"
 
 
 def test_a_refusal_raises_rather_than_being_read_as_content() -> None:
@@ -154,3 +154,9 @@ def test_a_missing_probability_field_raises_rather_than_defaulting() -> None:
 def test_a_probability_outside_the_range_is_refused_at_the_boundary() -> None:
     with pytest.raises(ValueError, match="probability"):
         FrontierAdjudicator(_client(1.7)).decide(ENTRY)
+
+
+def test_the_cost_constants_are_the_published_prices_of_the_model_named() -> None:
+    # Opus 5.5 is priced at $4 input and $20 output per million tokens. A
+    # mismatch would report a cost for one model while calling another.
+    assert (INPUT_USD_PER_MTOK, OUTPUT_USD_PER_MTOK) == (4.00, 20.00)

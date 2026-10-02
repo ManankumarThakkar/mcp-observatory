@@ -68,3 +68,9 @@ extend-exclude = ["fixtures"]
 python_version = "3.11"
 strict = true
 files = ["analyzer", "evals", "tests"]
+
+# The frontier judge's SDK is the optional `triage` extra. CI installs only the
+# dev extra, so the import must type-check whether or not the SDK is present.
+[[tool.mypy.overrides]]
+module = ["anthropic", "anthropic.*"]
+ignore_missing_imports = true
