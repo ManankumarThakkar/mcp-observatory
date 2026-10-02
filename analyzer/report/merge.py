@@ -93,10 +93,63 @@ def merge_findings(
             "first_seen": existing["first_seen"] if existing else now,
             "last_seen": now,
         }
+        if existing and existing.get("previous_ids"):
+            merged[finding_id]["previous_ids"] = list(existing["previous_ids"])
+
+    _carry_moved(merged, now=now)
 
     # Sorted by identity, so two runs that found the same things produce the
     # same file and a diff in the repository always means the findings moved.
     return [merged[finding_id] for finding_id in sorted(merged)]
+
+
+def _where_and_what(record: Record) -> tuple[str, str, str, str]:
+    return (
+        str(record["server_id"]),
+        str(record["rule_id"]),
+        str(record["location"]["file"]),
+        str(record["evidence"]),
+    )
+
+
+def _carry_moved(merged: dict[str, Record], *, now: str) -> None:
+    """Treat a finding whose code only moved line as the same finding.
+
+    The line is part of `finding_id`, so an edit anywhere above a finding gives
+    it a new id. Measured on 2026-10-02, all 41 findings that vanished between
+    runs had reappeared at another line of the same file with identical
+    evidence. Taken at face value, that resets how long a finding has existed
+    and orphans any notice sent about it.
+
+    Records not seen tonight are paired with records first seen tonight that
+    have the same server, rule, file and evidence, when the same number vanished
+    as arrived, in line order: inserted code shifts repeated findings down
+    together. Pairing only unique evidence matched 5 of those 41, because one
+    file held 36 with identical evidence. Unequal counts are left alone: separate
+    records are the safe outcome, since a finding no notice names is withheld.
+    The id is not changed to drop the line, because every id already issued,
+    including the frozen study's, would stop matching.
+    """
+    vanished: dict[tuple[str, str, str, str], list[str]] = {}
+    arrived: dict[tuple[str, str, str, str], list[str]] = {}
+    for finding_id, record in merged.items():
+        if record["last_seen"] != now:
+            vanished.setdefault(_where_and_what(record), []).append(finding_id)
+        elif record["first_seen"] == now:
+            arrived.setdefault(_where_and_what(record), []).append(finding_id)
+
+    def by_line(finding_id: str) -> int:
+        return int(merged[finding_id]["location"]["line"])
+
+    for key, old_ids in vanished.items():
+        new_ids = arrived.get(key, [])
+        if len(old_ids) != len(new_ids):
+            continue
+        for old_id, new_id in zip(sorted(old_ids, key=by_line), sorted(new_ids, key=by_line), strict=True):
+            old = merged.pop(old_id)
+            new = merged[new_id]
+            new["first_seen"] = old["first_seen"]
+            new["previous_ids"] = [*old.get("previous_ids", []), old["finding_id"]]
 
 
 def load_previous(path: Path) -> list[Record]:

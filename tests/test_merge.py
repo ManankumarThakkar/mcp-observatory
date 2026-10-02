@@ -9,6 +9,7 @@ from analyzer.report.merge import load_previous, merge_findings, seen_in, write_
 
 NOW = "2026-09-20T00:00:00Z"
 EARLIER = "2026-08-01T00:00:00Z"
+MIDDLE = "2026-09-01T00:00:00Z"
 
 
 def _finding(rule_id: str = "UNICODE-CONCEAL", line: int = 42, sha: str = "a" * 40) -> Finding:
@@ -192,3 +193,80 @@ def test_seen_in_keeps_only_the_records_one_scan_stamped() -> None:
         {"finding_id": "c", "last_seen": NOW},
     ]
     assert [r["finding_id"] for r in seen_in(records, NOW)] == ["a", "c"]
+
+
+# --- a finding whose code moved ------------------------------------------------
+
+
+def _at(line: int, evidence: str = "tool description says: ignore previous instructions",
+        file: str = "src/index.ts", sha: str = "b" * 40) -> Finding:
+    return Finding(
+        server_id="owner/repo",
+        commit_sha=sha,
+        rule_id="TOOL-DESC-INJECTION",
+        severity="high",
+        confidence="high",
+        location=Location(file=file, line=line),
+        evidence=evidence,
+    )
+
+
+def test_a_finding_that_moved_to_another_line_keeps_its_history() -> None:
+    """Measured 2026-10-02: 41 of 41 vanished findings had moved line, same evidence.
+
+    The line is part of the id, so an edit above a finding re-keys it. Treating
+    it as new would reset how long it has existed and orphan any notice sent
+    about it.
+    """
+    old, moved = _at(10), _at(20)
+    merged = merge_findings([_aged(old)], [moved.to_dict()], now=NOW)
+
+    assert [r["finding_id"] for r in merged] == [moved.finding_id]
+    assert merged[0]["first_seen"] == EARLIER
+    assert merged[0]["previous_ids"] == [old.finding_id]
+
+
+def test_a_finding_moved_twice_remembers_every_id_it_had() -> None:
+    first, second, third = _at(10), _at(20), _at(30)
+    merged = merge_findings([_aged(first)], [second.to_dict()], now=MIDDLE)
+    merged = merge_findings(merged, [third.to_dict()], now=NOW)
+    assert merged[0]["previous_ids"] == [first.finding_id, second.finding_id]
+
+
+def test_a_finding_seen_again_keeps_the_ids_it_had_before() -> None:
+    old, moved = _at(10), _at(20)
+    merged = merge_findings([_aged(old)], [moved.to_dict()], now=MIDDLE)
+    merged = merge_findings(merged, [moved.to_dict()], now=NOW)
+    assert merged[0]["previous_ids"] == [old.finding_id]
+
+
+def test_repeated_evidence_moved_together_is_paired_in_line_order() -> None:
+    """Measured 2026-10-02: one file held 36 findings with identical evidence, and
+    pairing only unique evidence matched 5 of 41 moved findings. Code inserted
+    above them shifts them all down together, so equal counts pair in order."""
+    a, b = _at(10), _at(11)
+    a2, b2 = _at(30), _at(32)
+    merged = merge_findings([_aged(a), _aged(b)], [b2.to_dict(), a2.to_dict()], now=NOW)
+    carried = {r["finding_id"]: r["previous_ids"] for r in merged}
+    assert carried == {a2.finding_id: [a.finding_id], b2.finding_id: [b.finding_id]}
+
+
+def test_unequal_repeats_are_not_paired() -> None:
+    # Two identical findings vanished and one appeared: one was fixed, and which
+    # one cannot be known. Left separate, the new one stays withheld.
+    merged = merge_findings([_aged(_at(10)), _aged(_at(11))], [_at(30).to_dict()], now=NOW)
+    assert len(merged) == 3
+    assert not any(r.get("previous_ids") for r in merged)
+
+
+def test_the_same_evidence_in_another_file_is_a_different_finding() -> None:
+    merged = merge_findings([_aged(_at(10))], [_at(10, file="src/other.ts").to_dict()], now=NOW)
+    assert len(merged) == 2
+
+
+def test_a_finding_still_seen_tonight_is_never_paired_with_a_new_one() -> None:
+    # Both exist tonight, so neither moved: the new one is a second finding.
+    still, extra = _at(10), _at(40)
+    merged = merge_findings([_aged(still)], [still.to_dict(), extra.to_dict()], now=NOW)
+    assert len(merged) == 2
+    assert not any(r.get("previous_ids") for r in merged)
