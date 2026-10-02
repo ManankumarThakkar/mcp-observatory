@@ -145,3 +145,37 @@ def test_a_full_run_projected_over_the_cap_is_refused(tmp_path: Path, monkeypatc
     main([*argv, "--sample", "1"])
     with pytest.raises(RuntimeError, match="projected"):
         main([*argv, "--max-cost", "2"])
+
+
+def test_the_summary_also_measures_movement_without_a_threshold() -> None:
+    # A judge that scores every finding below 0.5 can never flip at the midpoint,
+    # which says nothing about whether context moves it. The shift in probability
+    # between the views needs no threshold.
+    entries = [_entry(i, server=f"s/{i}") for i in range(6)]
+    answers = {e["entry_id"]: {"window": 0.30, "function": 0.10} for e in entries}
+    lines = summary_lines(entries, answers, arm="frontier", seed=1)
+    shift = next(line for line in lines if "lower with the whole function" in line)
+    assert "6 lower" in shift
+    assert "0 higher" in shift
+    assert "median shift -0.20" in shift
+    assert any(line.strip().startswith("first judge, same findings:") for line in lines)
+
+
+class FailingJudge(FixedJudge):
+    """Refuses one finding, as a model may."""
+
+    def decide(self, entry: Mapping[str, Any]) -> Decision:
+        if "read(p1)" in str(entry["context"]):
+            raise ValueError(f"the model refused to answer for {entry['entry_id']}")
+        return super().decide(entry)
+
+
+def test_a_failed_call_is_reported_with_its_reason_not_dropped(tmp_path: Path) -> None:
+    # A refusal repeats on every retry and a network blip does not, so the
+    # reason decides what to do next; dropping it hides which happened.
+    results = judge([_entry(1), _entry(2)], adjudicator=FailingJudge(), cache_path=tmp_path / "c.jsonl", max_cost=1.0)
+    assert "g-1" not in results.answers
+    assert list(results.failures.values()) == [
+        "ValueError: the model refused to answer for g-1",
+        "ValueError: the model refused to answer for g-1",
+    ]
