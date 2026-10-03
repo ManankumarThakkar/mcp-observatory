@@ -48,6 +48,21 @@ RESPONSE_SCHEMA: dict[str, Any] = {
 }
 
 
+def build_prompt(entry: Mapping[str, Any]) -> str:
+    """The whole message a chat-model judge reads for one finding.
+
+    Module-level so every chat-model arm sends the same text: a second copy
+    would drift, and the comparison would then be between two prompts.
+    """
+    question = build_question(str(entry["rule_id"]))["real"]["instructions"]
+    return (
+        f"{question}\n\n"
+        f"Language: {entry['language']}\n\n"
+        f"{present(entry)}\n\n"
+        "Answer with your probability that this is a real problem."
+    )
+
+
 class FrontierAdjudicator:
     """The same question as the decision model, asked of a frontier model.
 
@@ -67,19 +82,11 @@ class FrontierAdjudicator:
         self._model = model
 
     def decide(self, entry: Mapping[str, Any]) -> Decision:
-        question = build_question(str(entry["rule_id"]))["real"]["instructions"]
-        prompt = (
-            f"{question}\n\n"
-            f"Language: {entry['language']}\n\n"
-            f"{present(entry)}\n\n"
-            "Answer with your probability that this is a real problem."
-        )
-
         started = time.monotonic()
         response = self._client.messages.create(
             model=self._model,
             max_tokens=MAX_TOKENS,
-            messages=[{"role": "user", "content": prompt}],
+            messages=[{"role": "user", "content": build_prompt(entry)}],
             output_config={"effort": EFFORT, "format": {"type": "json_schema", "schema": RESPONSE_SCHEMA}},
         )
         elapsed_ms = (time.monotonic() - started) * 1000
