@@ -227,11 +227,19 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.retest and not first_run.exists():
         raise RuntimeError(f"a retest compares against the first run, and there is none at {first_run}")
 
+    adjudicator = adjudicator_for(args.arm)
+    # Which weights answered, kept beside the answers. Only a judge that can
+    # name fixed weights has an identity; the others are pinned by their stored
+    # answers instead.
+    identity = getattr(adjudicator, "identity", None)
+    if identity:
+        (args.out / f"{args.arm}{suffix}.identity.json").write_text(json.dumps(identity, sort_keys=True) + "\n")
+
     if args.sample is not None:
         chosen = set(sample_ids(entries, args.sample))
         judged = judge(
             [e for e in pool if str(e["entry_id"]) in chosen],
-            adjudicator=adjudicator_for(args.arm),
+            adjudicator=adjudicator,
             cache_path=cache_path,
             max_cost=float("inf"),
         )
@@ -254,7 +262,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         raise RuntimeError(
             f"the full run is projected at ${projected:.2f}, above the cap of ${args.max_cost:.2f}"
         )
-    judged = judge(pool, adjudicator=adjudicator_for(args.arm), cache_path=cache_path, max_cost=args.max_cost)
+    judged = judge(pool, adjudicator=adjudicator, cache_path=cache_path, max_cost=args.max_cost)
     (args.out / f"{args.arm}{suffix}.jsonl").write_text(
         "".join(
             json.dumps({"entry_id": entry_id, **answer}, sort_keys=True) + "\n"
