@@ -47,9 +47,11 @@ jobs:
     # the first disclosure windows, and the history's encryption depends on the
     # runner's gpg behaving as tested.
     runs-on: ubuntu-24.04
-    # The corpus scan is the long pole. The platform's ceiling is six hours;
-    # this stops a hung clone from burning all of it.
-    timeout-minutes: 90
+    # The platform's ceiling is six hours; this stops a hung clone from burning
+    # all of it. A normal night takes 27 to 38 minutes. 150 leaves room for the
+    # crawl's retries below (on 5-7 October 2026 a slow registry made each
+    # failed crawl take 16 to 20 minutes) and a full scan after them.
+    timeout-minutes: 150
     permissions:
       contents: write
       pages: write
@@ -126,8 +128,26 @@ jobs:
       # scale of months rather than nights. The erasure guard refuses to
       # overwrite the committed coverage document with a census-only one, so
       # docs/coverage.md is left alone here.
+      #
+      # Retried whole, up to three times, ten minutes apart. On 5, 6 and 7
+      # October 2026 the registry was slow from the runners for the whole crawl
+      # (16 to 20 minutes instead of 90 seconds) and one page exhausted its
+      # retries each night, a different page every time; the same crawl run
+      # from elsewhere took three minutes. A later attempt usually finds the
+      # registry recovered. Three failures still fail the night, closed.
       - name: Crawl the registry
-        run: mcp-observatory crawl --summary /tmp/coverage.md
+        run: |
+          for attempt in 1 2 3; do
+            if mcp-observatory crawl --summary /tmp/coverage.md; then
+              exit 0
+            fi
+            if [ "$attempt" -lt 3 ]; then
+              echo "crawl attempt $attempt failed; trying again in ten minutes"
+              sleep 600
+            fi
+          done
+          echo "the registry crawl failed three times"
+          exit 1
 
       # The same sample and the same seed every night. A trend is only a trend
       # if consecutive points measure the same thing; a fresh sample each night

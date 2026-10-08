@@ -1,6 +1,7 @@
 """A JSON fetch that survives the failures the registry actually produces."""
 
 import json
+import sys
 import time
 import urllib.error
 import urllib.request
@@ -136,6 +137,7 @@ def http_fetch(
     opener: Opener = _urlopen,
     sleep: Callable[[float], None] = time.sleep,
     max_attempts: int = 5,
+    on_retry: Callable[[str, int, str], None] | None = None,
 ) -> JsonObject:
     """GET a JSON document, retrying the failures that are worth retrying.
 
@@ -150,7 +152,17 @@ def http_fetch(
     `sleep` is injected so the retry schedule is assertable without a test that
     actually waits seven seconds. A test that slow gets deleted within a week,
     and then nothing checks the backoff at all.
+
+    Every retry is reported, by default as one line on stderr. Three nightly
+    runs once failed with only the final give-up in the log, so nobody could
+    tell one slow page from a registry slow on every page; counting these
+    lines answers that.
     """
+
+    def report_to_stderr(url: str, attempt: int, reason: str) -> None:
+        print(f"retrying {url} (attempt {attempt} of {max_attempts}): {reason}", file=sys.stderr)
+
+    report = on_retry or report_to_stderr
     last_error = ""
 
     for attempt in range(max_attempts):
@@ -176,6 +188,7 @@ def http_fetch(
         # No sleep after the final attempt: nothing follows it, and a nightly
         # run should fail at once rather than a minute later.
         if attempt < max_attempts - 1:
+            report(url, attempt + 1, last_error)
             sleep(min(delay, MAX_BACKOFF_SECONDS))
 
     raise FetchFailed(f"{url} still failing after {max_attempts} attempts ({last_error})")
