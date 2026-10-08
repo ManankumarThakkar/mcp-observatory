@@ -22,7 +22,7 @@ from analyzer.crawler.github import (
     github_search,
     iter_discoveries,
 )
-from analyzer.crawler.http import FetchFailed, JsonObject, http_fetch
+from analyzer.crawler.http import FetchFailed, JsonObject, http_fetch, patient
 from analyzer.crawler.index import collapse_to_index, load_server_index, write_server_index
 from analyzer.crawler.registry import RegistryError, crawl_registry
 from analyzer.crawler.sample import sample_index
@@ -114,6 +114,16 @@ DEFAULT_DATA_DIR = Path("data")
 DEFAULT_CACHE_DIR = Path(".cache")
 DEFAULT_LEDGER_PATH = DEFAULT_CACHE_DIR / "ledger.jsonl"
 
+
+# A registry page that runs out of quick attempts is asked for again after a
+# pause, keeping every page already read. On 5-7 October 2026 the registry was
+# slow for the whole of each 16-20 minute crawl, and fine when tried hours
+# later; how long a slow spell lasts is not known, so this is a bounded bet,
+# not a measured fit. Three rounds five minutes apart cost a dead registry
+# about 18 minutes on its first page (five 30-second timeouts and their
+# backoff per round, plus two pauses) before the crawl fails closed.
+PAGE_ROUNDS = 3
+PAGE_PAUSE_SECONDS = 300.0
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
@@ -828,7 +838,7 @@ def _crawl(args: argparse.Namespace) -> int:
         search = github_search(token)
 
     coverage = run_crawl(
-        fetch=http_fetch,
+        fetch=patient(http_fetch, rounds=PAGE_ROUNDS, pause=PAGE_PAUSE_SECONDS),
         now=lambda: datetime.now(UTC),
         summary_path=Path(args.summary),
         corpus_path=Path(args.corpus),

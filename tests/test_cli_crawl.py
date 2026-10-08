@@ -5,10 +5,21 @@ from pathlib import Path
 import pytest
 
 from analyzer.cli import EXIT_SCAN_FAILED, main, run_crawl
-from analyzer.crawler.http import FetchFailed, JsonObject
+from analyzer.crawler.http import FetchFailed, JsonObject, StillFailing
 from analyzer.crawler.index import load_server_index
 
 FIXED_NOW = datetime(2026, 9, 21, 4, 5, 6, tzinfo=UTC)
+
+
+@pytest.fixture(autouse=True)
+def no_real_pauses(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Every crawl here waits zero seconds between rounds.
+
+    Without this, a regression that made the crawl wait on the wrong kind of
+    failure would stall the suite for ten minutes instead of failing fast; a
+    mutation check found exactly that.
+    """
+    monkeypatch.setattr("analyzer.cli.PAGE_PAUSE_SECONDS", 0.0)
 
 PAGE = {
     "servers": [
@@ -321,3 +332,36 @@ def test_a_first_crawl_writes_whatever_it_produced(tmp_path: Path) -> None:
     )
 
     assert (tmp_path / "coverage.md").exists()
+
+
+def test_a_crawl_resumes_from_the_page_that_failed_rather_than_starting_over(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # On 5-7 October 2026 one slow page ended each nightly crawl. A page that
+    # runs out of quick attempts now waits and is asked for again; the pages
+    # already read are kept, so the first page is fetched exactly once.
+    first: JsonObject = {
+        "servers": [{"server": {"name": "one/a", "repository": {"url": "https://github.com/solo/one"}}}],
+        "metadata": {"nextCursor": "page-2"},
+    }
+    second: JsonObject = {
+        "servers": [{"server": {"name": "two/b", "repository": {"url": "https://github.com/solo/two"}}}],
+        "metadata": {"nextCursor": None},
+    }
+    asked: list[str] = []
+    second_page_failures = [StillFailing("slow")]
+
+    def fetch(url: str) -> JsonObject:
+        asked.append(url)
+        if "cursor=page-2" not in url:
+            return first
+        if second_page_failures:
+            raise second_page_failures.pop()
+        return second
+
+    monkeypatch.setattr("analyzer.cli.http_fetch", fetch)
+    monkeypatch.chdir(tmp_path)
+
+    assert main(["crawl", "--summary", str(tmp_path / "coverage.md")]) == 0
+    assert sum("cursor=" not in url for url in asked) == 1
+    assert sum("cursor=page-2" in url for url in asked) == 2
