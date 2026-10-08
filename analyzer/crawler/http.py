@@ -41,6 +41,15 @@ class FetchFailed(Exception):
     """
 
 
+class StillFailing(FetchFailed):
+    """Raised when a URL kept failing transiently through every quick attempt.
+
+    Separate from a permanent failure such as a 404, because only this kind is
+    worth waiting minutes for: a page that did not exist will not exist later
+    either, while a slow registry usually recovers.
+    """
+
+
 @dataclass(frozen=True)
 class Response:
     """One HTTP response, reduced to the three things this module reads.
@@ -191,4 +200,39 @@ def http_fetch(
             report(url, attempt + 1, last_error)
             sleep(min(delay, MAX_BACKOFF_SECONDS))
 
-    raise FetchFailed(f"{url} still failing after {max_attempts} attempts ({last_error})")
+    raise StillFailing(f"{url} still failing after {max_attempts} attempts ({last_error})")
+
+
+def patient(
+    fetch: Callable[[str], JsonObject],
+    *,
+    rounds: int,
+    pause: float,
+    sleep: Callable[[float], None] = time.sleep,
+) -> Callable[[str], JsonObject]:
+    """A fetch that waits out a slow spell instead of ending the crawl.
+
+    When a page runs out of quick attempts, wait `pause` seconds and ask for
+    the same page again, up to `rounds` times in all. The crawl is a generator
+    paused on that page, so every page already read is kept: this resumes from
+    the page that failed rather than starting over.
+
+    On 5, 6 and 7 October 2026 one slow page ended each nightly crawl, a
+    different page each night. A permanent failure is never waited on.
+    """
+
+    def fetch_patiently(url: str) -> JsonObject:
+        for round_number in range(1, rounds + 1):
+            try:
+                return fetch(url)
+            except StillFailing as exc:
+                if round_number == rounds:
+                    raise StillFailing(f"{exc}; gave up after {rounds} rounds") from exc
+                print(
+                    f"waiting {pause:.0f}s before asking again (round {round_number} of {rounds}): {exc}",
+                    file=sys.stderr,
+                )
+                sleep(pause)
+        raise AssertionError("unreachable: the last round returns or raises")
+
+    return fetch_patiently

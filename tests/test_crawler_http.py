@@ -6,7 +6,15 @@ from collections.abc import Callable, Mapping
 
 import pytest
 
-from analyzer.crawler.http import FetchFailed, Response, as_response, http_fetch
+from analyzer.crawler.http import (
+    FetchFailed,
+    JsonObject,
+    Response,
+    StillFailing,
+    as_response,
+    http_fetch,
+    patient,
+)
 
 # Recorded from the live registry on 2026-09-21. The response carries no
 # rate-limit headers of any kind, which is why nothing here honours them.
@@ -189,3 +197,54 @@ def test_by_default_a_retry_is_written_to_stderr(capsys: pytest.CaptureFixture[s
     )
 
     assert "retrying https://registry.test/v0/servers (attempt 1 of 5): HTTP 502" in capsys.readouterr().err
+
+
+def test_running_out_of_quick_attempts_is_its_own_kind_of_failure() -> None:
+    # Only a page that kept failing transiently is worth waiting minutes for;
+    # a 404 or a body that is not JSON will say the same thing later.
+    with pytest.raises(StillFailing):
+        http_fetch("https://registry.test/v0/servers", opener=_responses(*[_status(503)] * 5), sleep=lambda _: None)
+
+
+def test_a_permanent_failure_is_not_the_waiting_kind() -> None:
+    with pytest.raises(FetchFailed) as caught:
+        http_fetch("https://registry.test/v0/servers", opener=_responses(_status(404)), sleep=lambda _: None)
+    assert not isinstance(caught.value, StillFailing)
+
+
+def test_a_patient_fetch_waits_and_asks_for_the_same_page_again() -> None:
+    asked: list[str] = []
+    slept: list[float] = []
+    outcomes: list[JsonObject | Exception] = [StillFailing("slow"), StillFailing("slow"), {"servers": []}]
+
+    def fetch(url: str) -> JsonObject:
+        asked.append(url)
+        outcome = outcomes.pop(0)
+        if isinstance(outcome, Exception):
+            raise outcome
+        return outcome
+
+    result = patient(fetch, rounds=3, pause=300.0, sleep=slept.append)("https://registry.test/page-7")
+
+    assert result == {"servers": []}
+    assert asked == ["https://registry.test/page-7"] * 3
+    assert slept == [300.0, 300.0]
+
+
+def test_a_patient_fetch_gives_up_after_its_rounds_and_says_so() -> None:
+    def fetch(url: str) -> JsonObject:
+        raise StillFailing(f"{url} still failing after 5 attempts (TimeoutError)")
+
+    with pytest.raises(StillFailing, match="3 rounds"):
+        patient(fetch, rounds=3, pause=300.0, sleep=lambda _: None)("https://registry.test/page-7")
+
+
+def test_a_patient_fetch_never_waits_on_a_permanent_failure() -> None:
+    slept: list[float] = []
+
+    def fetch(url: str) -> JsonObject:
+        raise FetchFailed(f"{url} returned HTTP 404")
+
+    with pytest.raises(FetchFailed, match="404"):
+        patient(fetch, rounds=3, pause=300.0, sleep=slept.append)("https://registry.test/page-7")
+    assert slept == []
