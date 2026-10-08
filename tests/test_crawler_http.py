@@ -147,3 +147,45 @@ def test_an_http_error_from_urllib_becomes_a_response() -> None:
     assert response.status == 429
     assert response.headers["retry-after"] == "3"
     assert response.body == b"slow down"
+
+
+def test_every_retry_is_reported_with_its_reason() -> None:
+    # Three nights failed with nothing in the log but the final give-up, so
+    # nobody could tell whether one page or every page was slow. Each retry
+    # now leaves a line.
+    retries: list[tuple[str, int, str]] = []
+
+    http_fetch(
+        "https://registry.test/v0/servers",
+        opener=_responses(TimeoutError("The read operation timed out"), _status(503), _ok({})),
+        sleep=lambda _: None,
+        on_retry=lambda url, attempt, reason: retries.append((url, attempt, reason)),
+    )
+
+    assert retries == [
+        ("https://registry.test/v0/servers", 1, "TimeoutError: The read operation timed out"),
+        ("https://registry.test/v0/servers", 2, "HTTP 503"),
+    ]
+
+
+def test_a_request_that_succeeds_first_time_reports_nothing() -> None:
+    retries: list[object] = []
+
+    http_fetch(
+        "https://registry.test/v0/servers",
+        opener=_responses(_ok({})),
+        sleep=lambda _: None,
+        on_retry=lambda *args: retries.append(args),
+    )
+
+    assert retries == []
+
+
+def test_by_default_a_retry_is_written_to_stderr(capsys: pytest.CaptureFixture[str]) -> None:
+    http_fetch(
+        "https://registry.test/v0/servers",
+        opener=_responses(_status(502), _ok({})),
+        sleep=lambda _: None,
+    )
+
+    assert "retrying https://registry.test/v0/servers (attempt 1 of 5): HTTP 502" in capsys.readouterr().err
